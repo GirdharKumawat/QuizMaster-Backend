@@ -51,6 +51,22 @@ def create_quiz(request):
 @api_view(["GET"])
 @authentication_classes([CookieJWTAuthentication])
 @permission_classes([IsAuthenticated])
+def get_quiz_list(request):
+    """Retrieve all quizzes and return a JSON-serializable list."""
+    user_id = request.user["_id"]
+    quizzes = quizzes_collection.find({"created_by": user_id})
+    print("Quizzes found:", quizzes.count())
+    quizzes = [{"_id": str(quiz["_id"]), "title": quiz["title"], "description": quiz["description"],
+                "total_time": quiz["total_time"],"start_time": quiz["start_time"],
+                "max_participants": quiz["max_participants"], "num_questions": len(quiz["questions"])} for quiz in quizzes]
+
+    return Response({"quizzes":quizzes}, status=status.HTTP_200_OK)
+ 
+
+
+@api_view(["GET"])
+@authentication_classes([CookieJWTAuthentication])
+@permission_classes([IsAuthenticated])
 def get_sessions(request, quiz_id):
     """Retrieve a quiz by ObjectId string and return a JSON-serializable document."""
   

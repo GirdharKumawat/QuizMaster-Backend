@@ -43,6 +43,7 @@ def signup(request):
 
     response = Response({
         "message": "User created successfully",
+        "id": str(user["_id"]),
         "username": user["username"],
         "email": user["email"]
     }, status=status.HTTP_201_CREATED)
@@ -69,6 +70,7 @@ def login(request):
     access_token, refresh_token = create_tokens_for_user(user)
 
     response = Response({
+        "id": str(user["_id"]),
         "username": user["username"],
         "email": user["email"]
     }, status=status.HTTP_200_OK)
@@ -84,9 +86,9 @@ def isAuthenticated(request):
     """Check if the user is authenticated based on the access token in cookies."""
     user = request.user
     if user:
-        return Response({"isAuthenticated": True}, status=status.HTTP_200_OK)
+        return Response({"authenticated": True}, status=status.HTTP_200_OK)
     else:
-        return Response({"isAuthenticated": False}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response({"authenticated": False}, status=status.HTTP_401_UNAUTHORIZED)
     
 
 @api_view(['POST'])
@@ -94,12 +96,12 @@ def isAuthenticated(request):
 @permission_classes([IsAuthenticated])
 def logout(request):
     """Clear auth cookies to log the user out."""
+    # response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
+    # # Clear cookies by setting empty value and expired date.
+    # response.set_cookie('access_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+    # response.set_cookie('refresh_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+    # return response
     response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
-    # Clear cookies by setting empty value and expired date.
-    response.set_cookie('access_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    response.set_cookie('refresh_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    return response
-
 @api_view(['POST'])
 def cookieTokenRefresh(request):  
     """Issue a new access token using the refresh token stored in cookies."""

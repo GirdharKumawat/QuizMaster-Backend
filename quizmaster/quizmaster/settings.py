@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'corsheaders',
     'rest_framework_simplejwt',
     'rest_framework',
     'accounts',
@@ -52,6 +53,7 @@ REST_FRAMEWORK = {
 }   
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -139,4 +141,10 @@ SIMPLE_JWT = {
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": False,
   
+  
 }
+# allow all ORIGINS
+CORS_ALLOW_ALL_ORIGINS = True
+
+# Allow cookies/credentials
+CORS_ALLOW_CREDENTIALS = True
