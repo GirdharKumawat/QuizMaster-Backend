@@ -21,7 +21,8 @@ class QuizCreateSerializer(serializers.Serializer):
     topic = serializers.CharField()
     difficulty = serializers.CharField()
     max_participants = serializers.IntegerField()
-    total_time = serializers.IntegerField()  # in minutes
+    pointsPerCorrect = serializers.IntegerField()
+    duration = serializers.IntegerField()  # in minutes
     start_time = serializers.DateTimeField()
     questions = QuestionSerializer(many=True)
     created_by = serializers.CharField(read_only=True)

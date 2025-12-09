@@ -12,6 +12,14 @@ from bson import ObjectId
 from datetime import datetime
  
 
+def _is_valid_object_id(oid):
+    """Return True if oid is a valid ObjectId (handles None/other types)."""
+    try:
+        return ObjectId.is_valid(str(oid))
+    except Exception:
+        return False
+ 
+
  
 
  
@@ -51,18 +59,86 @@ def create_quiz(request):
 @api_view(["GET"])
 @authentication_classes([CookieJWTAuthentication])
 @permission_classes([IsAuthenticated])
-def get_quiz_list(request):
-    """Retrieve all quizzes and return a JSON-serializable list."""
+def get_created_quiz_list(request):
+    """Retrieve all quizzes for the logged-in user and include session info."""
     user_id = request.user["_id"]
-    quizzes = quizzes_collection.find({"created_by": user_id})
-    print("Quizzes found:", quizzes.count())
-    quizzes = [{"_id": str(quiz["_id"]), "title": quiz["title"], "description": quiz["description"],
-                "total_time": quiz["total_time"],"start_time": quiz["start_time"],
-                "max_participants": quiz["max_participants"], "num_questions": len(quiz["questions"])} for quiz in quizzes]
 
-    return Response({"quizzes":quizzes}, status=status.HTTP_200_OK)
+    # Fetch quizzes created by this user
+    quizzes = list(quizzes_collection.find({"created_by": user_id}))
+    # Fetch sessions hosted by this user
+    sessions = list(sessions_collection.find({"host_id": user_id}))
+
+    data = []
+
+    for quiz in quizzes:
+        quiz_id = str(quiz["_id"])
+
+        # Find matching session (if exists)
+        session = next((s for s in sessions if str(s.get("quiz_id")) == quiz_id), None)
+
+        # Build response object
+        quiz_obj = {
+            "_id": quiz_id,
+            "title": quiz.get("title"),
+            "description": quiz.get("description"),
+            "topic": quiz.get("topic"),
+            "difficulty": quiz.get("difficulty"),
+            "duration": quiz.get("duration"),
+            "start_time": quiz.get("start_time"),
+            "max_participants": quiz.get("max_participants"),
+            "pointsPerCorrect": quiz.get("pointsPerCorrect"),
+            "questionCount": len(quiz.get("questions", [])),
+            "host_id": str(quiz.get("created_by")),
+            "status": session.get("status") if session else None,
+            "participants": session.get("participants", []) if session else [],
+            "created_at": quiz.get("created_at"),
+        }
+
+        data.append(quiz_obj)
+
+    return Response({"quizzes": data}, status=status.HTTP_200_OK)
+
+
+@api_view(["GET"])
+@authentication_classes([CookieJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def get_enrolled_quiz_list(request):
+    """Retrieve all quizzes the user has joined as a participant."""
+    user_id = request.user["_id"]
+
+    # Fetch sessions where the user is a participant
+    sessions = list(sessions_collection.find({"participants.user_id": user_id}))
+
+    data = []
+
+    for session in sessions:
+        quiz_id = session.get("quiz_id")
+        quiz = quizzes_collection.find_one({"_id": ObjectId(quiz_id)})
+
+        if not quiz:
+            continue
  
+        # Build response object
+        quiz_obj = {
+            "_id": str(quiz["_id"]),
+            "title": quiz.get("title"),
+            "description": quiz.get("description"),
+            "topic": quiz.get("topic"),
+            "difficulty": quiz.get("difficulty"),
+            "duration": quiz.get("duration"),
+            "start_time": quiz.get("start_time"),
+            "max_participants": quiz.get("max_participants"),
+            "pointsPerCorrect": quiz.get("pointsPerCorrect"),
+            "questionCount": len(quiz.get("questions", [])),
+            "host_id": str(quiz.get("created_by")),
+            "status": session.get("status"),
+            "participants": session.get("participants", []),
+            "created_at": quiz.get("created_at"),
+        }
 
+        data.append(quiz_obj)
+
+    return Response({"quizzes": data}, status=status.HTTP_200_OK)
 
 @api_view(["GET"])
 @authentication_classes([CookieJWTAuthentication])
@@ -92,6 +168,7 @@ def get_sessions(request, quiz_id):
 @authentication_classes([CookieJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def join_quiz(request, quiz_id):
+    
     print("Joining quiz:", quiz_id)
     user = request.user 
     user_id = user["_id"]
@@ -122,7 +199,7 @@ def join_quiz(request, quiz_id):
       "user_id": user_id,
       "username": username,
       "score": 0,
-      "currentQuestionIndex": -1,
+      "currentQuestionIndex": 0,
       "answers": [],
       "joinedAt": datetime.utcnow()
     }
@@ -158,71 +235,132 @@ def start_quiz(request, quiz_id):
     return Response({"message": "Quiz started successfully."}, status=status.HTTP_200_OK)
 
 
+@api_view(["GET"])
+@authentication_classes([CookieJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def get_current_question(request, quiz_id):
+    """Return the participant's current question (without the correct answer).
+
+    Response contains: question_index, question, options, total_questions.
+    """
+    user = request.user
+    user_id = user["_id"]
+
+    # session must exist
+    quiz_session = sessions_collection.find_one({"quiz_id": quiz_id})
+    if not quiz_session:
+        return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    # find participant
+    participants = quiz_session.get("participants", [])
+    participant = next((p for p in participants if p["user_id"] == user_id), None)
+    if not participant:
+        return Response({"detail": "User not a participant in this quiz."}, status=status.HTTP_403_FORBIDDEN)
+
+    # validate quiz existence and id
+    if not _is_valid_object_id(quiz_id):
+        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})
+    if not quiz:
+        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    current_index = participant.get("currentQuestionIndex", 0)
+    if current_index is None:
+        current_index = 0
+
+    questions = quiz.get("questions", [])
+    total = len(questions)
+
+    if current_index >= total:
+        return Response({"detail": "No more questions left."}, status=status.HTTP_400_BAD_REQUEST)
+
+    q = questions[current_index]
+    # Do not expose correct_answer
+    question_payload = {
+        "question_index": current_index,
+        "question": q.get("question"),
+        "options": q.get("options", []),
+        "total_questions": total,
+    }
+    
+    
+
+    
+    
+
+    return Response(question_payload, status=status.HTTP_200_OK)
+
+
 @csrf_exempt
 @api_view(["POST"])
 @authentication_classes([CookieJWTAuthentication])
 @permission_classes([IsAuthenticated])
-def check_answer(request, quiz_id,selected_answer):
-    user = request.user 
+def submit_answer(request, quiz_id):
+    """Accept selected_answer in JSON, evaluate current question, append answer,
+    increment currentQuestionIndex by 1 and update score."""
+    user = request.user
     user_id = user["_id"]
-    
-    if not selected_answer:
-        return Response({"detail": "Selected answer is required."}, status=status.HTTP_400_BAD_REQUEST)
-    
+
+    selected_answer = request.data.get("answer")
+    if selected_answer is None:
+        return Response({"detail": "selected_answer is required."}, status=status.HTTP_400_BAD_REQUEST)
+
     quiz_session = sessions_collection.find_one({"quiz_id": quiz_id})
     if not quiz_session:
         return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    quiz = quizzes_collection.find_one({"_id": ObjectId(quiz_id)})
+
+    # validate quiz id and fetch quiz
+    if not _is_valid_object_id(quiz_id):
+        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})
     if not quiz:
         return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    
-    if quiz_session["status"] != "in_progress":
+
+    if quiz_session.get("status") != "in_progress":
         return Response({"detail": "Quiz is not in progress."}, status=status.HTTP_400_BAD_REQUEST)
-    
+
     participants = quiz_session.get("participants", [])
     participant = next((p for p in participants if p["user_id"] == user_id), None)
-    
     if not participant:
         return Response({"detail": "User not a participant in this quiz."}, status=status.HTTP_403_FORBIDDEN)
-    
-   
-    current_index = participant.get("currentQuestionIndex", -1) + 1
-    print("Current question index:", current_index)
-    
-     # Check if there are more questions
-    if current_index >= len(quiz["questions"]):
+
+    current_index = participant.get("currentQuestionIndex", 0)
+    if current_index is None:
+        current_index = 0
+
+    questions = quiz.get("questions", [])
+    if current_index >= len(questions):
         return Response({"detail": "No more questions left."}, status=status.HTTP_400_BAD_REQUEST)
-    
-    current_question = quiz["questions"][current_index]
-    print("Current question:", current_question)
-    is_correct = (selected_answer == current_question["correct_answer"])
-    print("Is correct:", is_correct)
-    
-    selected_answer = {
-          "question_index": current_index,
-          "selectedOption": selected_answer,
-          "isCorrect":  is_correct,
-        }
-    print("Selected answer data:", selected_answer)
-    # Update participant's data
+
+    current_question = questions[current_index]
+    is_correct = (selected_answer == current_question.get("correct_answer"))
+
+    answer_record = {
+        "question_index": current_index,
+        "selectedOption": selected_answer,
+        "isCorrect": is_correct,
+    }
+
+    # compute new score
     total_score = participant.get("score", 0)
     if is_correct:
-        total_score = total_score + 1
-    
+        total_score += 1
+
+    # increment index for next question
+    next_index = current_index + 1
+
     update_fields = {
-        "participants.$.currentQuestionIndex": current_index,
-        "participants.$.answers": participant.get("answers", []) + [selected_answer],
+        "participants.$.currentQuestionIndex": next_index,
+        "participants.$.answers": participant.get("answers", []) + [answer_record],
         "participants.$.score": total_score,
     }
-    print("Update fields:", update_fields)
+
     sessions_collection.update_one(
         {"quiz_id": quiz_id, "participants.user_id": user_id},
         {"$set": update_fields}
     )
-    
-    return Response({
-        "is_correct": is_correct,
-    }, status=status.HTTP_200_OK)
+
+    return Response({"is_correct": is_correct, "next_question_index": next_index}, status=status.HTTP_200_OK)
 
