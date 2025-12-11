@@ -32,6 +32,8 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+     'daphne',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -43,6 +45,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'accounts',
     'quiz',
+   
 ]
 REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': (
@@ -81,6 +84,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'quizmaster.wsgi.application'
+ASGI_APPLICATION = 'quizmaster.asgi.application'
 
 
 # Database
@@ -148,3 +152,12 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 # Allow cookies/credentials
 CORS_ALLOW_CREDENTIALS = True
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}

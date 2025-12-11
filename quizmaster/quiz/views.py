@@ -297,45 +297,52 @@ def get_current_question(request, quiz_id):
 @authentication_classes([CookieJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def submit_answer(request, quiz_id):
-    """Accept selected_answer in JSON, evaluate current question, append answer,
-    increment currentQuestionIndex by 1 and update score."""
+    """
+    Evaluates answer, pushes to history, increments score/index atomically.
+    Prevents race conditions using optimistic locking.
+    """
     user = request.user
-    user_id = user["_id"]
+    user_id = user["_id"] # Ensure this matches your DB format (str vs ObjectId)
 
     selected_answer = request.data.get("answer")
     if selected_answer is None:
         return Response({"detail": "selected_answer is required."}, status=status.HTTP_400_BAD_REQUEST)
 
-    quiz_session = sessions_collection.find_one({"quiz_id": quiz_id})
-    if not quiz_session:
-        return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    # validate quiz id and fetch quiz
+    # 1. Validate Quiz ID and Fetch Quiz (Questions)
     if not _is_valid_object_id(quiz_id):
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-
+        return Response({"detail": "Invalid Quiz ID."}, status=status.HTTP_400_BAD_REQUEST)
+        
     quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})
     if not quiz:
         return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
 
+    # 2. Fetch ONLY the specific participant from the session
+    # We filter by quiz_id AND user_id immediately
+    quiz_session = sessions_collection.find_one(
+        {"quiz_id": quiz_id, "participants.user_id": user_id},
+        {"status": 1, "participants.$": 1} # Projection: Fetch only the matching participant
+    )
+
+    if not quiz_session:
+        return Response({"detail": "Session not found or user not a participant."}, status=status.HTTP_404_NOT_FOUND)
+        
     if quiz_session.get("status") != "in_progress":
         return Response({"detail": "Quiz is not in progress."}, status=status.HTTP_400_BAD_REQUEST)
 
-    participants = quiz_session.get("participants", [])
-    participant = next((p for p in participants if p["user_id"] == user_id), None)
-    if not participant:
-        return Response({"detail": "User not a participant in this quiz."}, status=status.HTTP_403_FORBIDDEN)
-
+    # Extract participant data (Projection ensures list has exactly 1 item)
+    participant = quiz_session["participants"][0]
     current_index = participant.get("currentQuestionIndex", 0)
-    if current_index is None:
-        current_index = 0
 
     questions = quiz.get("questions", [])
+    
+    # 3. Check if quiz is finished
     if current_index >= len(questions):
         return Response({"detail": "No more questions left."}, status=status.HTTP_400_BAD_REQUEST)
 
+    # 4. Evaluate Answer
     current_question = questions[current_index]
-    is_correct = (selected_answer == current_question.get("correct_answer"))
+    correct_answer = current_question.get("correct_answer")
+    is_correct = (selected_answer == correct_answer)
 
     answer_record = {
         "question_index": current_index,
@@ -343,24 +350,36 @@ def submit_answer(request, quiz_id):
         "isCorrect": is_correct,
     }
 
-    # compute new score
-    total_score = participant.get("score", 0)
-    if is_correct:
-        total_score += 1
-
-    # increment index for next question
-    next_index = current_index + 1
-
-    update_fields = {
-        "participants.$.currentQuestionIndex": next_index,
-        "participants.$.answers": participant.get("answers", []) + [answer_record],
-        "participants.$.score": total_score,
+    # 5. Atomic Update with Optimistic Locking
+    # We define what we want to change
+    update_ops = {
+        "$push": {"participants.$.answers": answer_record}, # Append efficiently
+        "$inc": {"participants.$.currentQuestionIndex": 1}  # Increment atomically
     }
 
-    sessions_collection.update_one(
-        {"quiz_id": quiz_id, "participants.user_id": user_id},
-        {"$set": update_fields}
+    # If correct, we also increment the score atomically
+    if is_correct:
+        update_ops["$inc"]["participants.$.score"] = 1
+
+    # EXECUTE UPDATE
+    # The filter includes 'participants.currentQuestionIndex': current_index
+    # This prevents race conditions. If the index changed while we were calculating,
+    # this update will fail (match count 0), preventing double submission.
+    result = sessions_collection.update_one(
+        {
+            "quiz_id": quiz_id, 
+            "participants.user_id": user_id,
+            "participants.currentQuestionIndex": current_index 
+        },
+        update_ops
     )
 
-    return Response({"is_correct": is_correct, "next_question_index": next_index}, status=status.HTTP_200_OK)
+    if result.matched_count == 0:
+        # This happens if the user double-clicked and the index already moved forward
+        return Response({"detail": "Answer already submitted for this question."}, status=status.HTTP_409_CONFLICT)
 
+    return Response({
+        "is_correct": is_correct, 
+        "correct_answer": correct_answer, # Optional: return correct answer to user
+        "next_question_index": current_index + 1
+    }, status=status.HTTP_200_OK)
