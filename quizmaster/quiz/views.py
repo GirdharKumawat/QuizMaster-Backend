@@ -4,23 +4,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.views.decorators.csrf import csrf_exempt
 from .serializers import QuizCreateSerializer
+from .utils import is_valid_object_id
 from accounts.authentication import CookieJWTAuthentication
 from rest_framework.decorators import authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from quizmaster.mongo_client import quizzes_collection, sessions_collection
 from bson import ObjectId
 from datetime import datetime
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
  
 
-def _is_valid_object_id(oid):
-    """Return True if oid is a valid ObjectId (handles None/other types)."""
-    try:
-        return ObjectId.is_valid(str(oid))
-    except Exception:
-        return False
- 
-
- 
 
  
 @csrf_exempt
@@ -174,38 +168,59 @@ def join_quiz(request, quiz_id):
     user_id = user["_id"]
     username = user.get("username")
  
-    session = sessions_collection.find_one({"quiz_id": quiz_id})
+    # First check if quiz exists
     quiz = quizzes_collection.find_one({"_id": ObjectId(quiz_id)})
-    
-    if not session:
-        return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
-
     if not quiz:
         return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
     
-    if session["status"] != "waiting":
-        return Response({"detail": "Cannot join. Quiz already started."}, status=status.HTTP_400_BAD_REQUEST)
-    
-    
-    participants = session.get("participants", [])
-
-    if len(participants) >= quiz.get("max_participants", 0):
-        return Response({"detail": "Quiz is full."}, status=status.HTTP_400_BAD_REQUEST)
-
-    if any(participant["user_id"] == ObjectId(user_id) for participant in participants):
-        return Response({"detail": "User already joined the quiz."}, status=status.HTTP_400_BAD_REQUEST)
+    max_participants = quiz.get("max_participants", 0)
 
     new_participant = {
-      "user_id": user_id,
-      "username": username,
-      "score": 0,
-      "currentQuestionIndex": 0,
-      "answers": [],
-      "joinedAt": datetime.utcnow()
+        "user_id": user_id,
+        "username": username,
+        "score": 0,
+        "currentQuestionIndex": 0,
+        "answers": [],
+        "joinedAt": datetime.utcnow()
     }
-    sessions_collection.update_one(
-        {"quiz_id": quiz_id},
-        {"$push": {"participants": new_participant}}
+
+    # Atomic update: Only add participant if:
+    # 1. Session exists and status is "waiting"
+    # 2. User hasn't already joined
+    # 3. Room is not full (participants count < max_participants)
+    result = sessions_collection.find_one_and_update(
+        {
+            "quiz_id": quiz_id,
+            "status": "waiting",
+            "participants.user_id": {"$ne": user_id},  # User not already in list
+            "$expr": {"$lt": [{"$size": "$participants"}, max_participants]}  # Room not full
+        },
+        {"$push": {"participants": new_participant}},
+        return_document=False  # Return original doc (before update)
+    )
+
+    if result is None:
+        # Update failed - determine why
+        session = sessions_collection.find_one({"quiz_id": quiz_id})
+        if not session:
+            return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
+        if session["status"] != "waiting":
+            return Response({"detail": "Cannot join. Quiz already started."}, status=status.HTTP_400_BAD_REQUEST)
+        if any(p["user_id"] == user_id for p in session.get("participants", [])):
+            return Response({"detail": "User already joined the quiz."}, status=status.HTTP_400_BAD_REQUEST)
+        if len(session.get("participants", [])) >= max_participants:
+            return Response({"detail": "Quiz is full."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "Could not join quiz."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Notify other participants via WebSocket
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"quiz_{quiz_id}",
+        {
+            "type": "broadcast_participant_joined",
+            "user_id": user_id,
+            "username": username
+        }
     )
 
     return Response({"message": "Joined the quiz successfully."}, status=status.HTTP_200_OK)
@@ -230,6 +245,14 @@ def start_quiz(request, quiz_id):
     sessions_collection.update_one(
         {"quiz_id": quiz_id},
         {"$set": {"status": "in_progress", "startedAt": datetime.utcnow()}}
+    )
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"quiz_{quiz_id}",  # Group Name
+        {
+            "type": "broadcast_game_start", # Function to call in consumer
+            "duration": 60 # You might want to fetch actual duration from the quiz object
+        }
     )
 
     return Response({"message": "Quiz started successfully."}, status=status.HTTP_200_OK)
@@ -258,7 +281,7 @@ def get_current_question(request, quiz_id):
         return Response({"detail": "User not a participant in this quiz."}, status=status.HTTP_403_FORBIDDEN)
 
     # validate quiz existence and id
-    if not _is_valid_object_id(quiz_id):
+    if not is_valid_object_id(quiz_id):
         return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
 
     quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})
@@ -283,12 +306,6 @@ def get_current_question(request, quiz_id):
         "options": q.get("options", []),
         "total_questions": total,
     }
-    
-    
-
-    
-    
-
     return Response(question_payload, status=status.HTTP_200_OK)
 
 
@@ -309,7 +326,7 @@ def submit_answer(request, quiz_id):
         return Response({"detail": "selected_answer is required."}, status=status.HTTP_400_BAD_REQUEST)
 
     # 1. Validate Quiz ID and Fetch Quiz (Questions)
-    if not _is_valid_object_id(quiz_id):
+    if not is_valid_object_id(quiz_id):
         return Response({"detail": "Invalid Quiz ID."}, status=status.HTTP_400_BAD_REQUEST)
         
     quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})

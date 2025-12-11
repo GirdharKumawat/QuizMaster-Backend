@@ -11,18 +11,18 @@ import os
 
 from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
-from channels.auth import AuthMiddlewareStack
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'quizmaster.settings')
 
 django_asgi_app = get_asgi_application()
 
-# Import routing after Django setup
+# Import routing and middleware after Django setup
 from quiz.routing import websocket_urlpatterns
+from quizmaster.token_auth import JwtAuthMiddleware
 
 application = ProtocolTypeRouter({
     "http": django_asgi_app,
-    "websocket": AuthMiddlewareStack(
+    "websocket": JwtAuthMiddleware(
         URLRouter(
             websocket_urlpatterns
         )
