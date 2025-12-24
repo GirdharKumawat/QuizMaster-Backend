@@ -6,7 +6,6 @@ import os
 
 # Load environment variables from .env file
 load_dotenv()
-
 # Get MongoDB URI from environment
 uri = os.getenv('MONGO_URI')
 
@@ -18,3 +17,4 @@ db = client.quizmaster
 users_collection = db.users
 quizzes_collection = db.quizzes
 sessions_collection = db.sessions
+submissions_collection = db.submissions

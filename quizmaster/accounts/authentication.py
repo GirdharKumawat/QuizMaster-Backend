@@ -32,6 +32,7 @@ class CookieJWTAuthentication(JWTAuthentication):
             raise AuthenticationFailed("User not found")
         
         user_doc["_id"] = str(user_doc["_id"])
+        print("Authenticated user:", user_doc)
         
          
         return (DictUser(user_doc), validated_token)

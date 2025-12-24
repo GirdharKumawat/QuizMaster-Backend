@@ -5,8 +5,8 @@ import accounts
  
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/v1/user/',include('accounts.urls')),
-    path('api/v1/quizzes/',include('quiz.urls')),
+    path('api/user/',include('accounts.urls')),
+    path('api/quizzes/',include('quiz.urls')),
     
     
 ]

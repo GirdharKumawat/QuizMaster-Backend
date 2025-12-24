@@ -1,402 +1,237 @@
-# quizzes/views.py
-from rest_framework.decorators import api_view
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.views.decorators.csrf import csrf_exempt
-from .serializers import QuizCreateSerializer
-from .utils import is_valid_object_id
-from accounts.authentication import CookieJWTAuthentication
-from rest_framework.decorators import authentication_classes, permission_classes
 from rest_framework.permissions import IsAuthenticated
-from quizmaster.mongo_client import quizzes_collection, sessions_collection
-from bson import ObjectId
-from datetime import datetime
+from .serializers import QuizCreateSerializer,  QuizSessionSerializer,JoinQuizSerializer,PlayerQuestionSerializer
+from .services import QuizService
+from accounts.authentication import CookieJWTAuthentication
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
  
 
 
- 
-@csrf_exempt
-@api_view(["POST"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def create_quiz(request):
-     
-    user = request.user 
-    user_id = user["_id"]
-    serializer = QuizCreateSerializer(data=request.data, context={"user": user_id})
+class CreateQuizView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
     
-    if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    def post(self, request):
+        # 1. Validate Input  
+        input_serializer = QuizCreateSerializer(data=request.data)
+        if not input_serializer.is_valid():
+            return Response(input_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    quiz_data = serializer.save()
-    quiz_result = quizzes_collection.insert_one(quiz_data)
-    
-    curr_quiz_session = {
-        "quiz_id": str(quiz_result.inserted_id),
-        "host_id": user_id,
-        "status": "waiting",
-        "participants": [],
-        "created_at": datetime.utcnow(),
-    }
-
-    quiz_session_result = sessions_collection.insert_one(curr_quiz_session)
-
-    return Response({
-        "message": "Quiz created",
-        "quiz_id": str(quiz_result.inserted_id),
-        "quiz_session_id": str(quiz_session_result.inserted_id)
-    }, status=status.HTTP_201_CREATED)
-
-
-@api_view(["GET"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def get_created_quiz_list(request):
-    """Retrieve all quizzes for the logged-in user and include session info."""
-    user_id = request.user["_id"]
-
-    # Fetch quizzes created by this user
-    quizzes = list(quizzes_collection.find({"created_by": user_id}))
-    # Fetch sessions hosted by this user
-    sessions = list(sessions_collection.find({"host_id": user_id}))
-
-    data = []
-
-    for quiz in quizzes:
-        quiz_id = str(quiz["_id"])
-
-        # Find matching session (if exists)
-        session = next((s for s in sessions if str(s.get("quiz_id")) == quiz_id), None)
-
-        # Build response object
-        quiz_obj = {
-            "_id": quiz_id,
-            "title": quiz.get("title"),
-            "description": quiz.get("description"),
-            "topic": quiz.get("topic"),
-            "difficulty": quiz.get("difficulty"),
-            "duration": quiz.get("duration"),
-            "start_time": quiz.get("start_time"),
-            "max_participants": quiz.get("max_participants"),
-            "pointsPerCorrect": quiz.get("pointsPerCorrect"),
-            "questionCount": len(quiz.get("questions", [])),
-            "host_id": str(quiz.get("created_by")),
-            "status": session.get("status") if session else None,
-            "participants": session.get("participants", []) if session else [],
-            "created_at": quiz.get("created_at"),
-        }
-
-        data.append(quiz_obj)
-
-    return Response({"quizzes": data}, status=status.HTTP_200_OK)
-
-
-@api_view(["GET"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def get_enrolled_quiz_list(request):
-    """Retrieve all quizzes the user has joined as a participant."""
-    user_id = request.user["_id"]
-
-    # Fetch sessions where the user is a participant
-    sessions = list(sessions_collection.find({"participants.user_id": user_id}))
-
-    data = []
-
-    for session in sessions:
-        quiz_id = session.get("quiz_id")
-        quiz = quizzes_collection.find_one({"_id": ObjectId(quiz_id)})
-
-        if not quiz:
-            continue
- 
-        # Build response object
-        quiz_obj = {
-            "_id": str(quiz["_id"]),
-            "title": quiz.get("title"),
-            "description": quiz.get("description"),
-            "topic": quiz.get("topic"),
-            "difficulty": quiz.get("difficulty"),
-            "duration": quiz.get("duration"),
-            "start_time": quiz.get("start_time"),
-            "max_participants": quiz.get("max_participants"),
-            "pointsPerCorrect": quiz.get("pointsPerCorrect"),
-            "questionCount": len(quiz.get("questions", [])),
-            "host_id": str(quiz.get("created_by")),
-            "status": session.get("status"),
-            "participants": session.get("participants", []),
-            "created_at": quiz.get("created_at"),
-        }
-
-        data.append(quiz_obj)
-
-    return Response({"quizzes": data}, status=status.HTTP_200_OK)
-
-@api_view(["GET"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def get_sessions(request, quiz_id):
-    """Retrieve a quiz by ObjectId string and return a JSON-serializable document."""
-  
-    session = sessions_collection.find_one({"quiz_id": quiz_id})
-    quiz = quizzes_collection.find_one({"_id": ObjectId(quiz_id)})
-    if not session:
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-    if not quiz:
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    session["_id"] = str(session["_id"])
-    quiz["_id"] = str(quiz["_id"])
-    
-    response = {
-        "quiz": quiz,
-        "session": session
-    }
-    return Response(response, status=status.HTTP_200_OK)
- 
-
-@csrf_exempt
-@api_view(["POST"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def join_quiz(request, quiz_id):
-    
-    print("Joining quiz:", quiz_id)
-    user = request.user 
-    user_id = user["_id"]
-    username = user.get("username")
- 
-    # First check if quiz exists
-    quiz = quizzes_collection.find_one({"_id": ObjectId(quiz_id)})
-    if not quiz:
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    max_participants = quiz.get("max_participants", 0)
-
-    new_participant = {
-        "user_id": user_id,
-        "username": username,
-        "score": 0,
-        "currentQuestionIndex": 0,
-        "answers": [],
-        "joinedAt": datetime.utcnow()
-    }
-
-    # Atomic update: Only add participant if:
-    # 1. Session exists and status is "waiting"
-    # 2. User hasn't already joined
-    # 3. Room is not full (participants count < max_participants)
-    result = sessions_collection.find_one_and_update(
-        {
-            "quiz_id": quiz_id,
-            "status": "waiting",
-            "participants.user_id": {"$ne": user_id},  # User not already in list
-            "$expr": {"$lt": [{"$size": "$participants"}, max_participants]}  # Room not full
-        },
-        {"$push": {"participants": new_participant}},
-        return_document=False  # Return original doc (before update)
-    )
-
-    if result is None:
-        # Update failed - determine why
-        session = sessions_collection.find_one({"quiz_id": quiz_id})
-        if not session:
-            return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
-        if session["status"] != "waiting":
-            return Response({"detail": "Cannot join. Quiz already started."}, status=status.HTTP_400_BAD_REQUEST)
-        if any(p["user_id"] == user_id for p in session.get("participants", [])):
-            return Response({"detail": "User already joined the quiz."}, status=status.HTTP_400_BAD_REQUEST)
-        if len(session.get("participants", [])) >= max_participants:
-            return Response({"detail": "Quiz is full."}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"detail": "Could not join quiz."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Notify other participants via WebSocket
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"quiz_{quiz_id}",
-        {
-            "type": "broadcast_participant_joined",
-            "user_id": user_id,
-            "username": username
-        }
-    )
-
-    return Response({"message": "Joined the quiz successfully."}, status=status.HTTP_200_OK)
-
-
-@csrf_exempt
-@api_view(["POST"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def start_quiz(request, quiz_id):
-    user = request.user 
-    user_id = user["_id"]
- 
-    quiz_session = sessions_collection.find_one({"quiz_id": quiz_id})
-    
-    if not quiz_session:
-        return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
-    
-    if quiz_session["host_id"] != user_id:
-        return Response({"detail": "Only the host can start the quiz."}, status=status.HTTP_403_FORBIDDEN)
-    
-    sessions_collection.update_one(
-        {"quiz_id": quiz_id},
-        {"$set": {"status": "in_progress", "startedAt": datetime.utcnow()}}
-    )
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"quiz_{quiz_id}",  # Group Name
-        {
-            "type": "broadcast_game_start", # Function to call in consumer
-            "duration": 60 # You might want to fetch actual duration from the quiz object
-        }
-    )
-
-    return Response({"message": "Quiz started successfully."}, status=status.HTTP_200_OK)
-
-
-@api_view(["GET"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def get_current_question(request, quiz_id):
-    """Return the participant's current question (without the correct answer).
-
-    Response contains: question_index, question, options, total_questions.
-    """
-    user = request.user
-    user_id = user["_id"]
-
-    # session must exist
-    quiz_session = sessions_collection.find_one({"quiz_id": quiz_id})
-    if not quiz_session:
-        return Response({"detail": "Quiz session not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    # find participant
-    participants = quiz_session.get("participants", [])
-    participant = next((p for p in participants if p["user_id"] == user_id), None)
-    if not participant:
-        return Response({"detail": "User not a participant in this quiz."}, status=status.HTTP_403_FORBIDDEN)
-
-    # validate quiz existence and id
-    if not is_valid_object_id(quiz_id):
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})
-    if not quiz:
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    current_index = participant.get("currentQuestionIndex", 0)
-    if current_index is None:
-        current_index = 0
-
-    questions = quiz.get("questions", [])
-    total = len(questions)
-
-    if current_index >= total:
-        return Response({"detail": "No more questions left."}, status=status.HTTP_400_BAD_REQUEST)
-
-    q = questions[current_index]
-    # Do not expose correct_answer
-    question_payload = {
-        "question_index": current_index,
-        "question": q.get("question"),
-        "options": q.get("options", []),
-        "total_questions": total,
-    }
-    return Response(question_payload, status=status.HTTP_200_OK)
-
-
-@csrf_exempt
-@api_view(["POST"])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def submit_answer(request, quiz_id):
-    """
-    Evaluates answer, pushes to history, increments score/index atomically.
-    Prevents race conditions using optimistic locking.
-    """
-    user = request.user
-    user_id = user["_id"] # Ensure this matches your DB format (str vs ObjectId)
-
-    selected_answer = request.data.get("answer")
-    if selected_answer is None:
-        return Response({"detail": "selected_answer is required."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # 1. Validate Quiz ID and Fetch Quiz (Questions)
-    if not is_valid_object_id(quiz_id):
-        return Response({"detail": "Invalid Quiz ID."}, status=status.HTTP_400_BAD_REQUEST)
+        # 2. Service Logic
+        user_id = request.user.get("_id")
+        created_quiz_data = QuizService.create_quiz(
+            user_id=user_id, 
+            quiz_data=input_serializer.validated_data
+        )
         
-    quiz = quizzes_collection.find_one({"_id": ObjectId(str(quiz_id))})
-    if not quiz:
-        return Response({"detail": "Quiz not found."}, status=status.HTTP_404_NOT_FOUND)
-
-    # 2. Fetch ONLY the specific participant from the session
-    # We filter by quiz_id AND user_id immediately
-    quiz_session = sessions_collection.find_one(
-        {"quiz_id": quiz_id, "participants.user_id": user_id},
-        {"status": 1, "participants.$": 1} # Projection: Fetch only the matching participant
-    )
-
-    if not quiz_session:
-        return Response({"detail": "Session not found or user not a participant."}, status=status.HTTP_404_NOT_FOUND)
+        # 3. Prepare Response
+        response_serializer = QuizSessionSerializer(created_quiz_data)
         
-    if quiz_session.get("status") != "in_progress":
-        return Response({"detail": "Quiz is not in progress."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
-    # Extract participant data (Projection ensures list has exactly 1 item)
-    participant = quiz_session["participants"][0]
-    current_index = participant.get("currentQuestionIndex", 0)
-
-    questions = quiz.get("questions", [])
+class DashboardView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
     
-    # 3. Check if quiz is finished
-    if current_index >= len(questions):
-        return Response({"detail": "No more questions left."}, status=status.HTTP_400_BAD_REQUEST)
 
-    # 4. Evaluate Answer
-    current_question = questions[current_index]
-    correct_answer = current_question.get("correct_answer")
-    is_correct = (selected_answer == correct_answer)
+    def get(self, request):
+        """
+        Returns a list of all quizzes created by the current user.
+        """
+        # 1. Get user ID
+        user_id = request.user.get("_id")
+        
+        # 2. Get Data from Service (We need to make sure this function exists in services.py)
+        dashboard_data = QuizService.get_hosted_sessions(user_id)
+        
+        # 3. Serialize Data
+        serializer = QuizSessionSerializer(dashboard_data, many=True)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+ 
+class JoinQuizView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
-    answer_record = {
-        "question_index": current_index,
-        "selectedOption": selected_answer,
-        "isCorrect": is_correct,
-    }
+    def post(self, request):
+        # 1. Validate Input
+        serializer = JoinQuizSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    # 5. Atomic Update with Optimistic Locking
-    # We define what we want to change
-    update_ops = {
-        "$push": {"participants.$.answers": answer_record}, # Append efficiently
-        "$inc": {"participants.$.currentQuestionIndex": 1}  # Increment atomically
-    }
+        session_id = serializer.validated_data["session_id"]
+        user_id = request.user.get("_id")
+        username = request.user.get("username") 
+        
+        print("Joining user:", user_id, username)
+        # Assuming you have name in user object
 
-    # If correct, we also increment the score atomically
-    if is_correct:
-        update_ops["$inc"]["participants.$.score"] = 1
+        try:
+            # 2. Call Service
+            joined_session_data = QuizService.join_session(session_id, user_id,username)
+            
+            # 3. Return Standard Response
+            response_serializer = QuizSessionSerializer(joined_session_data)
+            return Response(response_serializer.data, status=status.HTTP_200_OK)
 
-    # EXECUTE UPDATE
-    # The filter includes 'participants.currentQuestionIndex': current_index
-    # This prevents race conditions. If the index changed while we were calculating,
-    # this update will fail (match count 0), preventing double submission.
-    result = sessions_collection.update_one(
-        {
-            "quiz_id": quiz_id, 
-            "participants.user_id": user_id,
-            "participants.currentQuestionIndex": current_index 
-        },
-        update_ops
-    )
+        except ValueError as e:
+            # Handle "Session full" or "Not found" errors nicely
+            return Response({"message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    if result.matched_count == 0:
-        # This happens if the user double-clicked and the index already moved forward
-        return Response({"detail": "Answer already submitted for this question."}, status=status.HTTP_409_CONFLICT)
+class EnrolledQuizListView(APIView):
+    authentication_classes = [CookieJWTAuthentication] 
+    permission_classes = [IsAuthenticated]
 
-    return Response({
-        "is_correct": is_correct, 
-        "correct_answer": correct_answer, # Optional: return correct answer to user
-        "next_question_index": current_index + 1
-    }, status=status.HTTP_200_OK)
+    def get(self, request):
+        user_id = request.user.get("_id")
+        
+        # 1. Get Enrolled Data
+        enrolled_data = QuizService.get_enrolled_sessions(user_id)
+        
+        # 2. Use the SAME Serializer (Consistency!)
+        serializer = QuizSessionSerializer(enrolled_data, many=True)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+class QuizStatusView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, session_id):
+        user_id = request.user.get("_id")
+        try:
+            progress = QuizService.get_user_progress(session_id, user_id)
+            return Response(progress, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+        
+# 1. START QUIZ (HOST)
+class StartQuizView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        session_id = request.data.get("session_id")
+        host_id = request.user.get("_id")
+
+        try:
+            # 1. DB Update (Service)
+            result = QuizService.start_quiz(session_id, host_id)
+            
+            # 2. SOCKET TRIGGER: Notify everyone "Quiz Started!"
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'quiz_{session_id}',  # Group Name
+                {
+                    'type': 'quiz_started', # Matches method name in Consumer
+                    'session_id': session_id,
+                    'start_time': str(result['start_time'])
+                }
+            )
+            
+            return Response(result, status=200)
+        except (PermissionError, ValueError) as e:
+            return Response({"error": str(e)}, status=400)
+        
+        
+# 2. GET PAPER (STUDENT)
+class GetQuestionPaperView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    def get(self, request, session_id):
+        user_id = request.user.get("_id")
+        try:
+            data = QuizService.get_question_paper(session_id, user_id)
+            
+            # SECURITY: Use Serializer to strip answers
+            safe_questions = PlayerQuestionSerializer(data["questions"], many=True).data
+            
+            return Response({
+                "questions": safe_questions,
+                "duration": data["duration"],
+                "start_time": data["start_time"]
+            }, status=200)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=400)
+
+# 3. SUBMIT ANSWER (STUDENT)
+class SubmitAnswerView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        # Extract inputs
+        user_id = request.user.get("_id")
+        user_name = request.user.get("username") 
+
+        session_id = request.data.get("session_id")
+        question_index = request.data.get("question_index")
+        selected_option = request.data.get("selected_option")
+
+        try:
+            # 1. DB Update (Service)
+            result = QuizService.submit_answer(
+                user_id, session_id, int(question_index), selected_option
+            )
+            
+            # 2. SOCKET TRIGGER: Only if score changed
+            if result['points'] > 0:
+                
+                # Fetch updated total score to show in leaderboard
+                # (You might want to return this from submit_answer to save a DB call)
+                progress = QuizService.get_user_progress(session_id, user_id)
+                
+                channel_layer = get_channel_layer()
+                async_to_sync(channel_layer.group_send)(
+                    f'quiz_{session_id}',
+                    {
+                        'type': 'leaderboard_update',
+                        'user_id': user_id,
+                        'name': user_name,
+                        'score_added': result['points'],
+                        'total_score': progress['current_score']
+                    }
+                )
+
+            return Response(result, status=200)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=400)
+    
+# 4. GET LEADERBOARD (HOST ONLY)
+class GetLeaderboardView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    def get(self, request, session_id):
+        try:
+            data = QuizService.get_leaderboard(session_id, request.user.get("_id"))
+            return Response({"leaderboard": data}, status=200)
+        except PermissionError:
+            return Response({"error": "Unauthorized"}, status=403)
+        except ValueError as e:
+             return Response({"error": str(e)}, status=404)
+
+# 5. END QUIZ (HOST ONLY)
+class EndQuizView(APIView):
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    def post(self, request):
+        try:
+            # 1. DB Update
+            result = QuizService.end_quiz(
+                request.data.get("session_id"), 
+                request.user.get("_id")
+            )
+            
+            # 2. SOCKET TRIGGER: Notify students "Quiz Ended"
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f'quiz_{request.data.get("session_id")}',
+                {'type': 'quiz_ended', 'session_id': result['session_id']}
+            )
+            return Response(result, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+        

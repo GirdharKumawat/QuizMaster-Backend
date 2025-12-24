@@ -1,37 +1,67 @@
-# quizzes/serializers.py
 from rest_framework import serializers
-import uuid
-from datetime import datetime
 
+# --------------------------------------
+# 1. QUESTION SERIALIZER
+# --------------------------------------
 class QuestionSerializer(serializers.Serializer):
     question = serializers.CharField()
     options = serializers.ListField(
         child=serializers.CharField(),
-        min_length=4,
+        min_length=4, 
         max_length=4
     )
     correct_answer = serializers.CharField()
-    explanation = serializers.CharField(allow_blank=True, required=False)
 
- 
+class PlayerQuestionSerializer(serializers.Serializer):
+    """For students: No correct_answer field"""
+    question = serializers.CharField()
+    options = serializers.ListField(child=serializers.CharField())
 
-class QuizCreateSerializer(serializers.Serializer):
+# --------------------------------------
+# 2. PARTICIPANT SERIALIZER (NEW)
+# --------------------------------------
+class ParticipantSerializer(serializers.Serializer):
+    user_id = serializers.CharField()
+    name = serializers.CharField()
+    score = serializers.IntegerField()
+
+# --------------------------------------
+# 3. QUIZ SESSION RESPONSE SERIALIZER
+# --------------------------------------
+class QuizSessionSerializer(serializers.Serializer):
+    session_id = serializers.CharField()
+    quiz_id = serializers.CharField()
     title = serializers.CharField()
-    description = serializers.CharField(allow_blank=True, required=False)
     topic = serializers.CharField()
     difficulty = serializers.CharField()
+    status = serializers.CharField()
+    host_id = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    
     max_participants = serializers.IntegerField()
-    pointsPerCorrect = serializers.IntegerField()
-    duration = serializers.IntegerField()  # in minutes
-    start_time = serializers.DateTimeField()
-    questions = QuestionSerializer(many=True)
-    created_by = serializers.CharField(read_only=True)
-    created_at = serializers.DateTimeField(read_only=True)
+    participant_count = serializers.IntegerField()
+    question_count = serializers.IntegerField()
+    
+    # NEW: Now a list of objects, not strings
+    participants = ParticipantSerializer(many=True)
 
-    def create(self, validated_data):
-        
-        quiz_data = validated_data.copy()   # short unique code
-        quiz_data["created_by"] = self.context.get("user") # we will pass user in view
-        quiz_data["created_at"] = datetime.utcnow()
+# --------------------------------------
+# 4. INPUT SERIALIZERS
+# --------------------------------------
+class QuizCreateSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=255)
+    description = serializers.CharField()
+    topic = serializers.CharField()
+    difficulty = serializers.ChoiceField(choices=["Easy", "Medium", "Hard"])
+    duration = serializers.IntegerField(min_value=1)
+    max_participants = serializers.IntegerField(min_value=1)
+    pointsPerCorrect = serializers.IntegerField(min_value=1)
+    questions = QuestionSerializer(many=True, allow_empty=False)
 
-        return quiz_data
+class JoinQuizSerializer(serializers.Serializer):
+    session_id = serializers.CharField()
+
+class SubmitAnswerSerializer(serializers.Serializer):
+    session_id = serializers.CharField()
+    question_index = serializers.IntegerField()
+    selected_option = serializers.CharField()

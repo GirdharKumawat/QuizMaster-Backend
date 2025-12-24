@@ -1,87 +1,75 @@
-# quiz/consumers.py
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
-from quizmaster.mongo_client import sessions_collection
-
 
 class QuizConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        self.quiz_id = self.scope['url_route']['kwargs']['quiz_id']
-        self.room_group_name = f'quiz_{self.quiz_id}'
+        """
+        Handles the WebSocket connection.
+        """
+        # 1. Get Session ID from the URL route (ws/quiz/<session_id>/)
+        self.session_id = self.scope['url_route']['kwargs']['session_id']
+        self.room_group_name = f'quiz_{self.session_id}'
         self.user = self.scope.get('user')
-        
-        # Check if user is authenticated
-        if not self.user or not getattr(self.user, 'is_authenticated', False):
+
+        # 2. Security Check: Reject if user is not authenticated
+        if not self.user or not self.user.is_authenticated:
             await self.close(code=4001)
             return
-        
-        # Store user_id for later use
-        self.user_id = getattr(self.user, 'id', None) or str(self.user.get('_id', ''))
-        
-        # Check if user is host or participant
-        session = await self.get_session()
-        if session:
-            self.is_host = (session.get('host_id') == self.user_id)
-        else:
-            self.is_host = False
 
+        # 3. Join the Redis Group (Room)
+        # This subscribes this specific WebSocket connection to the session's channel
         await self.channel_layer.group_add(
             self.room_group_name,
             self.channel_name
         )
+
         await self.accept()
 
     async def disconnect(self, close_code):
+        """
+        Handles WebSocket disconnection.
+        """
+        # Leave the Redis Group
         await self.channel_layer.group_discard(
             self.room_group_name,
             self.channel_name
         )
-    
-    @database_sync_to_async
-    def get_session(self):
-        """Fetch quiz session from MongoDB."""
-        return sessions_collection.find_one({"quiz_id": self.quiz_id})
 
-    async def receive(self, text_data):
-        data = json.loads(text_data)
-        action = data.get('action')
+    # ----------------------------------------------------
+    # EVENT HANDLERS
+    # These functions are triggered by your Views (via Redis)
+    # ----------------------------------------------------
 
-        if action == 'start_quiz':
-            # Verify host permission (not is_staff)
-            if self.is_host:
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        'type': 'broadcast_game_start',
-                        'duration': data.get('duration', 600)
-                    }
-                )
-            else:
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'message': 'Only the host can start the quiz'
-                }))
-
-    # Handler: Start Quiz (Server -> Client)
-    async def broadcast_game_start(self, event):
+    # 1. Triggered when Host calls /quiz/start/
+    async def quiz_started(self, event):
         await self.send(text_data=json.dumps({
-            'type': 'quiz_start',
-            'duration': event['duration']
+            'type': 'quiz_started',
+            'session_id': event['session_id'],
+            'start_time': event['start_time']
         }))
 
-    # Handler: Leaderboard Update (Server -> Client)
-    async def broadcast_leaderboard(self, event):
+    # 2. Triggered when a Student calls /quiz/submit/
+    async def leaderboard_update(self, event):
         await self.send(text_data=json.dumps({
             'type': 'leaderboard_update',
-            'top_players': event['data']
+            'user_id': event['user_id'],
+            'name': event['name'],
+            'score_added': event['score_added'],
+            'total_score': event['total_score']
         }))
 
-    # Handler: Participant Joined (Server -> Client)
-    async def broadcast_participant_joined(self, event):
+    # 3. Triggered when a Student calls /quiz/join/
+    async def participant_joined(self, event):
         await self.send(text_data=json.dumps({
             'type': 'participant_joined',
             'user_id': event['user_id'],
-            'username': event['username']
+            'name': event['name'],
+            'participant_count': event['participant_count']
         }))
-        
+    
+    # Event 4: Quiz Ended
+    async def quiz_ended(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'quiz_ended',
+            'session_id': event['session_id']
+        }))
