@@ -1,0 +1,600 @@
+{
+  "info": {
+    "name": "QuizMaster Quiz API",
+    "description": "Quiz endpoints for QuizMaster Backend",
+    "version": "2.0.0",
+    "baseUrl": "http://127.0.0.1:8000"
+  },
+
+  "endpoints": {
+    "quiz": {
+      "createQuiz": {
+        "method": "POST",
+        "url": "/api/quizzes/",
+        "description": "Create a new quiz with questions (Host only)",
+        "auth_required": true,
+        "request_body": {
+          "title": "string (required, max 255 chars)",
+          "description": "string (required)",
+          "topic": "string (required)",
+          "difficulty": "string (required, one of: 'easy', 'medium', 'hard')",
+          "duration": "integer (required, min 1, in minutes)",
+          "max_participants": "integer (required, min 1)",
+          "pointsPerCorrect": "integer (required, min 1)",
+          "questions": [
+            {
+              "question": "string (required)",
+              "options": ["string", "string", "string", "string"],
+              "correct_answer": "string (required, must match one option)"
+            }
+          ]
+        },
+        "example_request": {
+          "title": "JavaScript Fundamentals",
+          "description": "Test your JavaScript knowledge",
+          "topic": "Programming",
+          "difficulty": "medium",
+          "duration": 30,
+          "max_participants": 50,
+          "pointsPerCorrect": 10,
+          "questions": [
+            {
+              "question": "What is the output of typeof null?",
+              "options": ["null", "undefined", "object", "string"],
+              "correct_answer": "object"
+            },
+            {
+              "question": "Which method adds an element to the end of an array?",
+              "options": ["push()", "pop()", "shift()", "unshift()"],
+              "correct_answer": "push()"
+            }
+          ]
+        },
+        "response": {
+          "success": {
+            "status": 201,
+            "body": {
+              "session_id": "string",
+              "quiz_id": "string",
+              "title": "string",
+              "topic": "string",
+              "description": "string",
+              "difficulty": "string",
+              "duration": "integer",
+              "pointsPerCorrect": "integer",
+              "status": "waiting",
+              "host_id": "string",
+              "created_at": "datetime",
+              "max_participants": "integer",
+              "participant_count": 0,
+              "question_count": "integer",
+              "participants": []
+            }
+          }
+        }
+      },
+
+      "listQuizzes": {
+        "method": "GET",
+        "url": "/api/quizzes/",
+        "description": "Get all quizzes created by and enrolled by the current user",
+        "auth_required": true,
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "hosted_quizzes": [
+                {
+                  "session_id": "string",
+                  "quiz_id": "string",
+                  "title": "string",
+                  "topic": "string",
+                  "description": "string",
+                  "difficulty": "string",
+                  "duration": "integer",
+                  "pointsPerCorrect": "integer",
+                  "status": "string (waiting | active | completed)",
+                  "host_id": "string",
+                  "created_at": "datetime",
+                  "max_participants": "integer",
+                  "participant_count": "integer",
+                  "question_count": "integer",
+                  "participants": []
+                }
+              ],
+              "enrolled_quizzes": [
+                {
+                  "session_id": "string",
+                  "quiz_id": "string",
+                  "title": "string",
+                  "topic": "string",
+                  "description": "string",
+                  "difficulty": "string",
+                  "duration": "integer",
+                  "pointsPerCorrect": "integer",
+                  "status": "string (waiting | active | completed)",
+                  "host_id": "string",
+                  "created_at": "datetime",
+                  "max_participants": "integer",
+                  "participant_count": "integer",
+                  "question_count": "integer",
+                  "participants": []
+                }
+              ]
+            }
+          }
+        }
+      },
+
+      "getQuizDetails": {
+        "method": "GET",
+        "url": "/api/quizzes/{session_id}/",
+        "description": "Get detailed information about a specific quiz session",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "session_id": "string",
+              "quiz_id": "string",
+              "title": "string",
+              "topic": "string",
+              "description": "string",
+              "difficulty": "string",
+              "duration": "integer",
+              "pointsPerCorrect": "integer",
+              "status": "string (waiting | active | completed)",
+              "host_id": "string",
+              "created_at": "datetime",
+              "max_participants": "integer",
+              "participant_count": "integer",
+              "question_count": "integer",
+              "participants": [
+                {
+                  "user_id": "string",
+                  "name": "string",
+                  "score": "integer",
+                  "status": "string (lobby | active | completed)"
+                }
+              ]
+            }
+          },
+          "errors": {
+            "404": {
+              "message": "Quiz session not found"
+            }
+          }
+        }
+      },
+
+      "joinQuiz": {
+        "method": "POST",
+        "url": "/api/quizzes/{session_id}/join/",
+        "description": "Join a quiz session as a participant",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "session_id": "string",
+              "quiz_id": "string",
+              "title": "string",
+              "topic": "string",
+              "description": "string",
+              "difficulty": "string",
+              "duration": "integer",
+              "pointsPerCorrect": "integer",
+              "status": "waiting",
+              "host_id": "string",
+              "created_at": "datetime",
+              "max_participants": "integer",
+              "participant_count": "integer",
+              "question_count": "integer",
+              "participants": [
+                {
+                  "user_id": "string",
+                  "name": "string",
+                  "score": 0,
+                  "status": "lobby"
+                }
+              ]
+            },
+            "websocket_event_triggered": "participant_joined"
+          },
+          "errors": {
+            "400": {
+              "error": "Session not found / Quiz is not open for joining / Session is full"
+            }
+          }
+        }
+      },
+
+      "startQuiz": {
+        "method": "POST",
+        "url": "/api/quizzes/{session_id}/start/",
+        "description": "Start a quiz session (Host only) - changes session status to active",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "session_id": "string",
+              "status": "active"
+            },
+            "websocket_event_triggered": "quiz_started"
+          },
+          "errors": {
+            "400": {
+              "error": "Session not found / Unauthorized"
+            }
+          }
+        }
+      },
+
+      "startQuizForParticipant": {
+        "method": "POST",
+        "url": "/api/quizzes/{session_id}/begin/",
+        "description": "Start quiz for individual participant - sets their quiz_start_time and status to active",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "session_id": "string",
+              "user_id": "string",
+              "quiz_start_time": "datetime",
+              "status": "active"
+            },
+            "websocket_event_triggered": "update_participant_status"
+          },
+          "errors": {
+            "400": {
+              "error": "Quiz has not been started by the host yet / You are not enrolled in this session"
+            }
+          }
+        }
+      },
+
+      "getQuestionPaper": {
+        "method": "GET",
+        "url": "/api/quizzes/{session_id}/questions/",
+        "description": "Get questions for a quiz (without correct answers - for participants). Returns participant's individual start_time.",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "questions": [
+                {
+                  "question": "string",
+                  "options": ["string", "string", "string", "string"]
+                }
+              ],
+              "current_question_index": "integer",
+              "start_time": "datetime (participant's individual quiz_start_time)"
+            }
+          },
+          "errors": {
+            "400": {
+              "error": "Session not found / You are not enrolled"
+            }
+          }
+        }
+      },
+
+      "submitAnswer": {
+        "method": "POST",
+        "url": "/api/quizzes/{session_id}/submit/",
+        "description": "Submit an answer for a question",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": {
+          "question_index": "integer (required, 0-based iNndex)",
+          "selected_option": "string (required)"
+        },
+        "example_request": {
+          "question_index": 0,
+          "selected_option": "object"
+        },
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "is_correct": "boolean",
+              "points": "integer (0 if wrong, pointsPerCorrect if correct)"
+            },
+            "websocket_event_triggered": "update_participant_score (only if points > 0)"
+          },
+          "errors": {
+            "400": {
+              "error": "Session not found / Invalid index"
+            }
+          }
+        }
+      },
+
+      "endQuiz": {
+        "method": "POST",
+        "url": "/api/quizzes/{session_id}/end/",
+        "description": "End a quiz session (Host only)",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "session_id": "string",
+              "status": "completed"
+            },
+            "websocket_event_triggered": "quiz_ended"
+          },
+          "errors": {
+            "400": {
+              "error": "Unauthorized / Error message"
+            }
+          }
+        }
+      },
+
+      "markCompleted": {
+        "method": "POST",
+        "url": "/api/quizzes/{session_id}/complete/",
+        "description": "Mark participant as completed (when student finishes quiz)",
+        "auth_required": true,
+        "url_params": {
+          "session_id": "string (required)"
+        },
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "session_id": "string",
+              "user_id": "string",
+              "status": "completed"
+            },
+            "websocket_event_triggered": "update_participant_status"
+          },
+          "errors": {
+            "400": {
+              "error": "You are not enrolled in this session"
+            }
+          }
+        }
+      },
+
+      "truncateCollections": {
+        "method": "DELETE",
+        "url": "/api/quizzes/dev/truncate/",
+        "description": "Truncate all quiz sessions and quizzes (DEV ONLY - remove in production)",
+        "auth_required": false,
+        "request_body": null,
+        "response": {
+          "success": {
+            "status": 200,
+            "body": {
+              "message": "Collections truncated successfully."
+            }
+          },
+          "errors": {
+            "500": {
+              "error": "Error message"
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "websocket": {
+    "connection": {
+      "url": "ws://localhost:8000/ws/quiz/{session_id}/",
+      "description": "WebSocket connection for real-time quiz updates",
+      "authentication": "Cookie-based JWT (same cookies used for REST API)",
+      "connection_flow": [
+        "1. User must be authenticated (cookies set)",
+        "2. Connect to ws://localhost:8000/ws/quiz/{session_id}/",
+        "3. Server validates authentication",
+        "4. If valid, connection accepted and user joins the session room",
+        "5. If invalid, connection closed with code 4001"
+      ]
+    },
+
+    "events": {
+      "participant_joined": {
+        "trigger": "When a new user joins the quiz session via POST /api/quizzes/join/",
+        "direction": "Server → All clients in session",
+        "payload": {
+          "type": "participant_joined",
+          "user_id": "string",
+          "name": "string"
+        },
+        "example": {
+          "type": "participant_joined",
+          "user_id": "507f1f77bcf86cd799439011",
+          "name": "John Doe"
+        }
+      },
+
+      "quiz_started": {
+        "trigger": "When host starts the quiz via POST /api/quizzes/start/",
+        "direction": "Server → All clients in session",
+        "payload": {
+          "type": "quiz_started",
+          "session_id": "string"
+        },
+        "example": {
+          "type": "quiz_started",
+          "session_id": "507f1f77bcf86cd799439011"
+        }
+      },
+
+      " ": {
+        "trigger": "When a participant submits a CORRECT answer via POST /api/quizzes/submit/",
+        "direction": "Server → All clients in session",
+        "payload": {
+          "type": "leaderboard_update",
+          "user_id": "string",
+          "name": "string",
+          "score_added": "integer",
+          "total_score": "integer"
+        },
+        "example": {
+          "type": "leaderboard_update",
+          "user_id": "507f1f77bcf86cd799439011",
+          "name": "John Doe",
+          "score_added": 10,
+          "total_score": 50
+        }
+      },
+
+      "participant_completed": {
+        "trigger": "When a participant marks themselves as completed via POST /api/quizzes/complete/",
+        "direction": "Server → All clients in session",
+        "payload": {
+          "type": "participant_completed",
+          "user_id": "string",
+          "name": "string",
+          "session_id": "string"
+        },
+        "example": {
+          "type": "participant_completed",
+          "user_id": "507f1f77bcf86cd799439011",
+          "name": "John Doe",
+          "session_id": "507f1f77bcf86cd799439012"
+        }
+      },
+
+      "quiz_ended": {
+        "trigger": "When host ends the quiz via POST /api/quizzes/end/",
+        "direction": "Server → All clients in session",
+        "payload": {
+          "type": "quiz_ended",
+          "session_id": "string"
+        },
+        "example": {
+          "type": "quiz_ended",
+          "session_id": "507f1f77bcf86cd799439011"
+        }
+      }
+    },
+
+    "client_usage_example": {
+      "javascript": {
+        "connect": "const socket = new WebSocket('ws://localhost:8000/ws/quiz/SESSION_ID/');",
+        "onOpen": "socket.onopen = () => console.log('Connected to quiz session');",
+        "onMessage": "socket.onmessage = (event) => { const data = JSON.parse(event.data); switch(data.type) { case 'quiz_started': /* handle */; break; case 'leaderboard_update': /* handle */; break; } };",
+        "onClose": "socket.onclose = (event) => console.log('Disconnected:', event.code);",
+        "onError": "socket.onerror = (error) => console.error('WebSocket error:', error);"
+      }
+    }
+  },
+
+  "data_models": {
+    "QuizSession": {
+      "session_id": "string (MongoDB ObjectId)",
+      "quiz_id": "string (MongoDB ObjectId)",
+      "title": "string",
+      "topic": "string",
+      "description": "string",
+      "difficulty": "string (easy | medium | hard)",
+      "duration": "integer (minutes)",
+      "pointsPerCorrect": "integer",
+      "status": "string (waiting | active | completed)",
+      "host_id": "string (user's MongoDB ObjectId)",
+      "created_at": "datetime",
+      "max_participants": "integer",
+      "participant_count": "integer",
+      "question_count": "integer",
+      "participants": "array of Participant objects"
+    },
+
+    "Participant": {
+      "user_id": "string",
+      "name": "string",
+      "score": "integer",
+      "status": "string (lobby | active | completed)",
+      "quiz_start_time": "datetime (null until participant starts quiz)"
+    },
+
+    "Question": {
+      "question": "string",
+      "options": "array of 4 strings",
+      "correct_answer": "string (one of the options)"
+    },
+
+    "PlayerQuestion": {
+      "question": "string",
+      "options": "array of strings",
+      "note": "correct_answer is NOT included for security"
+    },
+
+    "User": {
+      "_id": "string (MongoDB ObjectId)",
+      "username": "string",
+      "email": "string",
+      "password": "string (hashed, never returned in API)"
+    }
+  },
+
+  "status_codes": {
+    "200": "OK - Request successful",
+    "201": "Created - Resource created successfully",
+    "205": "Reset Content - Logout successful",
+    "400": "Bad Request - Invalid input or business logic error",
+    "401": "Unauthorized - Authentication required or invalid credentials",
+    "403": "Forbidden - Access denied (e.g., not the host)",
+    "404": "Not Found - Resource not found",
+    "500": "Internal Server Error - Server-side error"
+  },
+
+  "quiz_flow": {
+    "host_flow": [
+      "1. POST /api/user/signup/ or /api/user/login/ → Get authenticated",
+      "2. POST /api/quizzes/ → Create quiz with questions",
+      "3. Share session_id with participants",
+      "4. Connect to WebSocket: ws://localhost:8000/ws/quiz/{session_id}/",
+      "5. Wait for participants (receive 'participant_joined' events)",
+      "6. POST /api/quizzes/{session_id}/start/ → Start the quiz",
+      "7. Monitor participants via WebSocket events",
+      "8. POST /api/quizzes/{session_id}/end/ → End the quiz"
+    ],
+    "participant_flow": [
+      "1. POST /api/user/signup/ or /api/user/login/ → Get authenticated",
+      "2. POST /api/quizzes/{session_id}/join/ → Join quiz with session_id",
+      "3. Connect to WebSocket: ws://localhost:8000/ws/quiz/{session_id}/",
+      "4. Wait for 'quiz_started' event",
+      "5. POST /api/quizzes/{session_id}/begin/ → Start your individual timer",
+      "6. GET /api/quizzes/{session_id}/questions/ → Get questions",
+      "7. POST /api/quizzes/{session_id}/submit/ → Submit answers (repeat for each question)",
+      "8. POST /api/quizzes/{session_id}/complete/ → Mark as finished",
+      "9. Listen for 'quiz_ended' event or wait for timer"
+    ]
+  }
+}

@@ -24,6 +24,9 @@ class ParticipantSerializer(serializers.Serializer):
     user_id = serializers.CharField()
     name = serializers.CharField()
     score = serializers.IntegerField()
+    status = serializers.CharField()
+    quiz_start_time = serializers.DateTimeField(allow_null=True)
+    
 
 # --------------------------------------
 # 3. QUIZ SESSION RESPONSE SERIALIZER
@@ -33,7 +36,10 @@ class QuizSessionSerializer(serializers.Serializer):
     quiz_id = serializers.CharField()
     title = serializers.CharField()
     topic = serializers.CharField()
+    description = serializers.CharField()
     difficulty = serializers.CharField()
+    duration = serializers.IntegerField()
+    pointsPerCorrect = serializers.IntegerField()
     status = serializers.CharField()
     host_id = serializers.CharField()
     created_at = serializers.DateTimeField()
@@ -52,7 +58,7 @@ class QuizCreateSerializer(serializers.Serializer):
     title = serializers.CharField(max_length=255)
     description = serializers.CharField()
     topic = serializers.CharField()
-    difficulty = serializers.ChoiceField(choices=["Easy", "Medium", "Hard"])
+    difficulty = serializers.ChoiceField(choices=["easy", "medium", "hard"])
     duration = serializers.IntegerField(min_value=1)
     max_participants = serializers.IntegerField(min_value=1)
     pointsPerCorrect = serializers.IntegerField(min_value=1)

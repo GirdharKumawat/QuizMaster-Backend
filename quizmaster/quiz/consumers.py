@@ -40,36 +40,53 @@ class QuizConsumer(AsyncWebsocketConsumer):
     # These functions are triggered by your Views (via Redis)
     # ----------------------------------------------------
 
-    # 1. Triggered when Host calls /quiz/start/
-    async def quiz_started(self, event):
-        await self.send(text_data=json.dumps({
-            'type': 'quiz_started',
-            'session_id': event['session_id'],
-            'start_time': event['start_time']
-        }))
-
-    # 2. Triggered when a Student calls /quiz/submit/
-    async def leaderboard_update(self, event):
-        await self.send(text_data=json.dumps({
-            'type': 'leaderboard_update',
-            'user_id': event['user_id'],
-            'name': event['name'],
-            'score_added': event['score_added'],
-            'total_score': event['total_score']
-        }))
-
-    # 3. Triggered when a Student calls /quiz/join/
+    # Event 1: Participant Joined
     async def participant_joined(self, event):
         await self.send(text_data=json.dumps({
             'type': 'participant_joined',
             'user_id': event['user_id'],
             'name': event['name'],
-            'participant_count': event['participant_count']
+            'score': event['score'],
+            'status': event['status'],
+            'start_time': event['start_time']
         }))
+        
+
+    # Event 2: Quiz Started
+    async def quiz_started(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'quiz_started',
+        }))
+
+    # Event 3: participant Score Updated
+    async def update_participant_score(self, event):
+        await self.send(text_data=json.dumps({
+            'type': 'update_participant_score',
+            'user_id': event['user_id'],
+            'score': event['score']
+        }))   
     
-    # Event 4: Quiz Ended
+    
+    # Event 4: participant Status Updated    
+    async def update_participant_status(self, event):
+        if event['status'] == 'active':
+             await self.send(text_data=json.dumps({
+                'type': 'update_participant_status',
+                'user_id': event['user_id'],
+                'status': event['status'],
+                'quiz_start_time': event['quiz_start_time']
+            })) 
+        else:
+             await self.send(text_data=json.dumps({
+                'type': 'update_participant_status',
+                'user_id': event['user_id'],
+                'status': event['status'],
+            }))
+    
+    # Event 5: Quiz Ended
     async def quiz_ended(self, event):
         await self.send(text_data=json.dumps({
             'type': 'quiz_ended',
-            'session_id': event['session_id']
         }))
+
+  

@@ -17,6 +17,7 @@ class QuizService:
         for p in raw_participants:
             if isinstance(p, dict):
                 participants.append(p)
+                print(p)
             else:
                 # Legacy format: participant is just a user_id string
                 participants.append({
@@ -29,13 +30,15 @@ class QuizService:
             "session_id": str(session["_id"]),
             "quiz_id": str(quiz["_id"]),
             "title": quiz.get("title"),
+            "description": quiz.get("description"),
             "topic": quiz.get("topic"),
             "difficulty": quiz.get("difficulty"),
             "status": session.get("status"),
             "host_id": session.get("host_id"),
             "created_at": session.get("created_at"),
+            "duration": quiz.get("duration"),
+            "pointsPerCorrect": quiz.get("pointsPerCorrect"),
             "max_participants": quiz.get("max_participants"),
-            # Participants is now a list of objects {id, name, score}
             "participants": participants, 
             "participant_count": len(participants),
             "question_count": len(quiz.get("questions", []))
@@ -61,6 +64,11 @@ class QuizService:
     # pubilc methods
     
     @staticmethod
+    def get_session_by_quiz_id(quiz_id: str) -> dict:
+        session = sessions_collection.find_one({"quiz_id": quiz_id})
+        return session
+    
+    @staticmethod
     def create_quiz(user_id: str, quiz_data: dict) -> dict:
         quiz_data['created_by'] = user_id
         quiz_data['created_at'] = datetime.now()
@@ -78,6 +86,18 @@ class QuizService:
         session_data['_id'] = session_result.inserted_id
 
         return QuizService._build_response_dto(session_data, quiz_data)
+
+
+    @staticmethod
+    def get_quiz_details(session_id: str) -> dict:
+        session = sessions_collection.find_one({"_id": ObjectId(session_id)})
+        if not session:
+            raise ValueError(SESSION_NOT_FOUND)
+        
+        quiz = quizzes_collection.find_one({"_id": ObjectId(session["quiz_id"])})
+        return QuizService._build_response_dto(session, quiz)
+     
+
 
     @staticmethod
     def get_hosted_sessions(user_id: str) -> list:
@@ -115,7 +135,9 @@ class QuizService:
             new_participant = {
                 "user_id": user_id,
                 "name": user_name,
-                "score": 0
+                "score": 0,
+                "status": "lobby", # lobby -> active -> completed
+                "quiz_start_time": None
             }
             
             sessions_collection.update_one(
@@ -135,15 +157,73 @@ class QuizService:
             raise ValueError(SESSION_NOT_FOUND)
         if session["host_id"] != host_id:
             raise PermissionError(UNAUTHORIZED)
+        
+        # update status to active only if it waiting
+        if session["status"] != QuizStatus.WAITING.value:
+            raise ValueError("Quiz has already been started or ended.")
             
-        start_time = datetime.now()
         sessions_collection.update_one(
             {"_id": ObjectId(session_id)},
-            {"$set": {"status": "active", "actual_start_time": start_time}}
+            {"$set": {"status": "active"}}
         )
-        return {"session_id": session_id, "status": "active", "start_time": start_time}
+        return {"session_id": session_id, "status": "active"}
 
     @staticmethod
+    def start_quiz_for_participant(session_id: str, user_id: str,start_time) -> dict:
+
+        """
+        Sets the quiz_start_time for an individual participant when they start taking the quiz.
+        Also updates their status to 'active'.
+        """
+        session = sessions_collection.find_one({"_id": ObjectId(session_id)})
+        if not session:
+            raise ValueError(SESSION_NOT_FOUND)
+        
+        # Check if quiz has been started by host
+        if session["status"] != "active":
+            raise ValueError("Quiz has not been started by the host yet.")
+        
+        # Check if user is enrolled
+        participant = next(
+            (p for p in session.get("participants", []) if p["user_id"] == user_id), 
+            None
+        )
+        if not participant:
+            raise ValueError("You are not enrolled in this session.")
+        
+        # Check if already started
+        if participant.get("quiz_start_time") is not None:
+            return {
+                "session_id": session_id,
+                "user_id": user_id,
+                "quiz_start_time": participant["quiz_start_time"],
+                "status": participant.get("status"),
+                "message": "Quiz already started for this participant."
+            }
+         
+        
+        # Update participant's quiz_start_time and status to 'active'
+        sessions_collection.update_one(
+            {
+                "_id": ObjectId(session_id),
+                PARTICIPANTS_USER_ID: user_id
+            },
+            {
+                "$set": {
+                    "participants.$.quiz_start_time": start_time,
+                    "participants.$.status": "active"
+                }
+            }
+        )
+        
+        return {
+            "session_id": session_id,
+            "user_id": user_id,
+            "quiz_start_time": start_time,
+            "status": "active"
+        }
+
+    @staticmethod # get all questions for participant with current question index
     def get_question_paper(session_id: str, user_id: str) -> dict:
         session = sessions_collection.find_one({"_id": ObjectId(session_id)})
         if not session:
@@ -155,10 +235,26 @@ class QuizService:
              raise PermissionError("You are not enrolled.")
 
         quiz = quizzes_collection.find_one({"_id": ObjectId(session["quiz_id"])})
+        
+        # Get participant's individual quiz_start_time
+        participant = next(
+            (p for p in session.get("participants", []) if p["user_id"] == user_id), 
+            None
+        )
+        participant_start_time = participant.get("quiz_start_time") if participant else None
+        
+        # geting current question index from submissions
+        attempted_questions = submissions_collection.find(
+            {"session_id": session_id, "user_id": user_id},
+            {"question_index": 1, "_id": 0} 
+        )
+        attempted_indices = {doc["question_index"] for doc in attempted_questions}
+        current_question_index = len(attempted_indices)
+        
         return {
             "questions": quiz.get("questions", []),
-            "duration": quiz.get("duration"),
-            "start_time": session.get("actual_start_time")
+            "current_question_index": current_question_index,
+            "start_time": participant_start_time
         }
 
     @staticmethod
@@ -204,12 +300,20 @@ class QuizService:
         
     @staticmethod
     def get_user_progress(session_id: str, user_id: str) -> dict:
-        # Get history indices
+        # Get history with question indices and selected answers
         cursor = submissions_collection.find(
             {"session_id": session_id, "user_id": user_id},
-            {"question_index": 1, "_id": 0} 
+            {"question_index": 1, "selected_option": 1, "_id": 0} 
         )
-        attempted_indices = [doc["question_index"] for doc in cursor]
+        
+        # Build list of attempted questions with their selected answers
+        attempted_questions = [
+            {
+                "question_index": doc["question_index"],
+                "selected_option": doc["selected_option"]
+            } 
+            for doc in cursor
+        ]
         
         # Get Current Score from Object
         session = sessions_collection.find_one(
@@ -222,7 +326,7 @@ class QuizService:
             current_score = session["participants"][0].get("score", 0)
 
         return {
-            "attempted_indices": attempted_indices,
+            "attempted_questions": attempted_questions,
             "current_score": current_score
         }
         
@@ -238,8 +342,8 @@ class QuizService:
             raise ValueError(SESSION_NOT_FOUND)
         
         # Security: Only host can fetch full detailed leaderboard
-        if session["host_id"] != host_id:
-             raise PermissionError(UNAUTHORIZED)
+        # if session["host_id"] != host_id:
+            #  raise PermissionError(UNAUTHORIZED)
 
         participants = session.get("participants", [])
         
@@ -251,6 +355,32 @@ class QuizService:
             reverse=True
         )
         return sorted_participants
+
+    @staticmethod
+    def mark_participant_completed(session_id: str, user_id: str) -> dict:
+        """
+        Marks a participant's status as 'completed' when they finish the quiz.
+        """
+        session = sessions_collection.find_one({"_id": ObjectId(session_id)})
+        if not session:
+            raise ValueError(SESSION_NOT_FOUND)
+        
+        # Check if user is enrolled
+        is_enrolled = any(p["user_id"] == user_id for p in session.get("participants", []))
+        if not is_enrolled:
+            raise ValueError("You are not enrolled in this session.")
+        
+        # Update participant status to 'completed'
+        sessions_collection.update_one(
+            {
+                "_id": ObjectId(session_id),
+                PARTICIPANTS_USER_ID: user_id
+            },
+            {
+                "$set": {"participants.$.status": "completed"}
+            }
+        )
+        return {"session_id": session_id, "user_id": user_id, "status": "completed"}
 
     @staticmethod
     def end_quiz(session_id: str, host_id: str) -> dict:
@@ -266,3 +396,12 @@ class QuizService:
             {"$set": {"status": "completed"}}
         )
         return {"session_id": session_id, "status": "completed"}
+    
+    
+
+    @staticmethod
+    def truncate_collections():
+        quizzes_collection.delete_many({})
+        sessions_collection.delete_many({})
+        submissions_collection.delete_many({})
+        return True
