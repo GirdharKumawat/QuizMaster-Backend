@@ -15,9 +15,8 @@ class QuizService:
         # Normalize participants: handle both old (string) and new (object) formats
         participants = []
         for p in raw_participants:
-            if isinstance(p, dict):
+            if isinstance(p, dict):                    
                 participants.append(p)
-                print(p)
             else:
                 # Legacy format: participant is just a user_id string
                 participants.append({

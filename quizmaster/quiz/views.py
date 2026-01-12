@@ -2,7 +2,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from .serializers import QuizCreateSerializer,  QuizSessionSerializer,JoinQuizSerializer,PlayerQuestionSerializer
+from .serializers import QuizCreateSerializer,  QuizSessionSerializer, PlayerQuestionSerializer
 from .services import QuizService
 from accounts.authentication import CookieJWTAuthentication
 from channels.layers import get_channel_layer
@@ -137,6 +137,7 @@ class ParticipantActionsView(APIView):
                         'status': 'active',
                         'quiz_start_time': start_time
                     }
+                    
                 )
                 return Response(result, status=status.HTTP_200_OK)
             
@@ -189,6 +190,7 @@ class QuestionPaperView(APIView):
         user_id = request.user.get("_id")
         question_index = request.data.get("question_index")
         selected_option = request.data.get("selected_option")
+        
 
         try:
             result = QuizService.submit_answer(

@@ -10,7 +10,6 @@ load_dotenv()
 uri = os.getenv('MONGO_URI')
 
 # Create a new client and connect to the server
-print("MongoDB connected")
 client = MongoClient(uri, server_api=ServerApi('1'))
 
 db = client.quizmaster

@@ -5,7 +5,7 @@ from .views import (
     ParticipantActionsView,
     QuestionPaperView,
     TruncateCollectionsView
-)
+) 
 
 urlpatterns = [
     

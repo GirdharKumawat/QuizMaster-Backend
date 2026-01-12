@@ -36,7 +36,7 @@ def signup(request):
     try:
         users_collection.insert_one(user_data)
     except Exception as e:
-        return Response({"error": "Failed to create user."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({"error": "Failed to create user."+e}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     user = users_collection.find_one({"email": data["email"]})
     access_token, refresh_token = create_tokens_for_user(user)
@@ -82,7 +82,7 @@ def login(request):
 @api_view(['GET'])
 @authentication_classes([CookieJWTAuthentication])
 @permission_classes([IsAuthenticated])
-def isAuthenticated(request):
+def is_authenticated(request): 
     """Check if the user is authenticated based on the access token in cookies."""
     user = request.user
     if user:
@@ -92,18 +92,7 @@ def isAuthenticated(request):
     
 
 @api_view(['POST'])
-@authentication_classes([CookieJWTAuthentication])
-@permission_classes([IsAuthenticated])
-def logout(request):
-    """Clear auth cookies to log the user out."""
-    # response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
-    # # Clear cookies by setting empty value and expired date.
-    # response.set_cookie('access_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    # response.set_cookie('refresh_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    # return response
-    response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
-@api_view(['POST'])
-def cookieTokenRefresh(request):  
+def cookie_token_refresh(request):  
     """Issue a new access token using the refresh token stored in cookies."""
     refresh_token = request.COOKIES.get("refresh_token")
     if not refresh_token:
@@ -116,7 +105,7 @@ def cookieTokenRefresh(request):
         response.set_cookie(key='access_token', value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
         return response
     except Exception as e:
-        return Response({"error": "Failed to refresh token."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": "Failed to refresh token."+e}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -137,7 +126,23 @@ def profile(request):
         user['_id'] = str(user['_id'])  # Convert ObjectId to string for JSON serialization
         return Response(user, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response({"error": "Invalid or expired access token."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"error": "Invalid or expired access token. "+e}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@authentication_classes([CookieJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def logout(request):
+    """Clear auth cookies to log the user out."""
+    # response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
+    # # Clear cookies by setting empty value and expired date.
+    # response.set_cookie('access_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+    # response.set_cookie('refresh_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+    # return response
+    Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
+
+
+
 
 
 # --- Helper utilities used by views -------------------------------------------------

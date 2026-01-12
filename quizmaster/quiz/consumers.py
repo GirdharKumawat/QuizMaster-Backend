@@ -69,15 +69,19 @@ class QuizConsumer(AsyncWebsocketConsumer):
     
     # Event 4: participant Status Updated    
     async def update_participant_status(self, event):
+        start_time = event.get('quiz_start_time')
+        
+        start_time_str = start_time.isoformat() if start_time else None
+        
         if event['status'] == 'active':
-             await self.send(text_data=json.dumps({
+            await self.send(text_data=json.dumps({
                 'type': 'update_participant_status',
                 'user_id': event['user_id'],
                 'status': event['status'],
-                'quiz_start_time': event['quiz_start_time']
-            })) 
+                'quiz_start_time': start_time_str
+            }))
         else:
-             await self.send(text_data=json.dumps({
+            await self.send(text_data=json.dumps({
                 'type': 'update_participant_status',
                 'user_id': event['user_id'],
                 'status': event['status'],

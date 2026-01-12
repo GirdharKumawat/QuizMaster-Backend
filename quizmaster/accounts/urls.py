@@ -5,10 +5,10 @@ urlpatterns = [
     
     path('signup/',views.signup),
     path('login/',views.login),
-    path('isauthenticated/',views.isAuthenticated),
+    path('isauthenticated/',views.is_authenticated),
     path('logout/',views.logout),
     path('profile/',views.profile),
-    path('refresh-token/',views.cookieTokenRefresh),
+    path('refresh-token/',views.cookie_token_refresh),
     
      
     
