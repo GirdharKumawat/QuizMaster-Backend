@@ -215,10 +215,19 @@ class QuestionPaperView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
- 
-  
- 
- 
+# view to get correct answer for revirew purposes by the participant alonge with thire selected option
+class ReviewAnswersView(APIView):
+    """GET /quizzes/<session_id>/review/ - Get correct answers and participant's selections"""
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, session_id):
+        user_id = request.user.get("_id")
+        try:
+            review_data = QuizService.get_review_answers(session_id, user_id)
+            return Response(review_data, status=status.HTTP_200_OK)
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 # a temparoary view to tunckate the sessions collection and quiz collection
 class TruncateCollectionsView(APIView):

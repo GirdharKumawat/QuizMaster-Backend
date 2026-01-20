@@ -4,6 +4,7 @@ from .views import (
     HostActionsView,
     ParticipantActionsView,
     QuestionPaperView,
+    ReviewAnswersView,
     TruncateCollectionsView
 ) 
 
@@ -22,5 +23,7 @@ urlpatterns = [
     path('<str:session_id>/questions/', QuestionPaperView.as_view(), name='question-paper'),
     path('<str:session_id>/submit/', QuestionPaperView.as_view(), name='submit-answer'),
     
+    path('<str:session_id>/review/', ReviewAnswersView.as_view(), name='review-answers'),
+
     path('dev/truncate/', TruncateCollectionsView.as_view(), name='truncate'),
 ]

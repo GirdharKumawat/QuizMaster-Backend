@@ -11,6 +11,7 @@ class QuestionSerializer(serializers.Serializer):
         max_length=4
     )
     correct_answer = serializers.CharField()
+    explanation = serializers.CharField(allow_blank=True, required=False)   
 
 class PlayerQuestionSerializer(serializers.Serializer):
     """For students: No correct_answer field"""
@@ -40,6 +41,7 @@ class QuizSessionSerializer(serializers.Serializer):
     difficulty = serializers.CharField()
     duration = serializers.IntegerField()
     pointsPerCorrect = serializers.IntegerField()
+    start_time = serializers.DateTimeField()
     status = serializers.CharField()
     host_id = serializers.CharField()
     created_at = serializers.DateTimeField()
@@ -62,6 +64,7 @@ class QuizCreateSerializer(serializers.Serializer):
     duration = serializers.IntegerField(min_value=1)
     max_participants = serializers.IntegerField(min_value=1)
     pointsPerCorrect = serializers.IntegerField(min_value=1)
+    start_time = serializers.DateTimeField()
     questions = QuestionSerializer(many=True, allow_empty=False)
 
 class JoinQuizSerializer(serializers.Serializer):

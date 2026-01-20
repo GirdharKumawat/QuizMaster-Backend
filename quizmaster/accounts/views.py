@@ -60,7 +60,7 @@ def login(request):
     """
     serializer = LoginSerializer(data=request.data)
     if not serializer.is_valid():
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"message":serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
     data = serializer.validated_data
     user = users_collection.find_one({"email": data["email"]})

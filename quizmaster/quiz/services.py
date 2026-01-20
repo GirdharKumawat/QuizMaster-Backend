@@ -37,6 +37,7 @@ class QuizService:
             "created_at": session.get("created_at"),
             "duration": quiz.get("duration"),
             "pointsPerCorrect": quiz.get("pointsPerCorrect"),
+            "start_time": quiz.get("start_time"),
             "max_participants": quiz.get("max_participants"),
             "participants": participants, 
             "participant_count": len(participants),
@@ -396,6 +397,54 @@ class QuizService:
         )
         return {"session_id": session_id, "status": "completed"}
     
+    
+    def get_review_answers(session_id: str, user_id: str) -> list:
+ 
+        session = sessions_collection.find_one({"_id": ObjectId(session_id)})
+        if not session:
+            raise ValueError(SESSION_NOT_FOUND)
+        
+        # send only if quiz is completed
+        if session["status"] != "completed":
+            raise ValueError("Quiz is not yet completed.")
+
+        # Check enrollment inside the array of objects
+        is_enrolled = any(p["user_id"] == user_id for p in session.get("participants", []))
+        if not is_enrolled and session["host_id"] != user_id:
+             raise PermissionError("You are not enrolled.")
+
+        
+        quiz = quizzes_collection.find_one({"_id": ObjectId(session["quiz_id"])})
+
+        questions = quiz.get("questions", [])
+        
+        # Fetch user's submissions for this session
+        submissions_cursor = submissions_collection.find(
+            {"session_id": session_id, "user_id": user_id}
+        )
+        # Map submissions by question_index for easy lookup
+        # like a dictionary for example {0: {...}, 1: {...}}
+        # 
+        submissions_map = {
+            sub["question_index"]: sub for sub in submissions_cursor
+        }
+
+        review_list = []
+        for idx, question in enumerate(questions):
+            submission = submissions_map.get(idx)
+            selected_option = submission["selected_option"] if submission else None
+            is_correct = submission["is_correct"] if submission else False
+
+            review_list.append({
+                "question": question.get("question"),
+                "options": question.get("options"),
+                "correct_answer": question.get("correct_answer"),
+                "selected_option": selected_option,
+                "is_correct": is_correct,
+                "explanation": question.get("explanation", "")
+            })
+        
+        return review_list
     
 
     @staticmethod
