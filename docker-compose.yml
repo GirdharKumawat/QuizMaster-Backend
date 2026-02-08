@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  # Your Django App
+  web:
+    build: .
+    command: daphne -b 0.0.0.0 -p 8000 quizmaster.asgi:application
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - redis  # Wait for Redis to start first
+
+  # The New Redis Service
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

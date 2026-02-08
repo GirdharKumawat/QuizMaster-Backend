@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # Your Django App
+  web:
+    image: girdharkumawt/quizmaster-backend:latest
+    command: daphne -b 0.0.0.0 -p 8000 quizmaster.asgi:application
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URI=${MONGO_URI}
+      - SECRET_KEY=${SECRET_KEY}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=${DEBUG}
+      - COOKIE_SECURE=${COOKIE_SECURE}
+      - SAME_SITE=${SAME_SITE}
+      - CORS_ALLOW_ALL_ORIGINS=${CORS_ALLOW_ALL_ORIGINS}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  # Redis Service
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

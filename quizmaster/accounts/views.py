@@ -8,11 +8,14 @@ from .util import hash_password, verify_password
 from bson import ObjectId
 from .serializers import SignupSerializer, LoginSerializer
 from quizmaster.mongo_client import users_collection
+from dotenv import load_dotenv
+import os
+load_dotenv()
+# import this form .evn or settings in future
 
  
-COOKIE_SECURE = False
-SAME_SITE = 'Lax'   
-
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "False").lower() == "true"
+SAME_SITE = os.getenv("SAME_SITE", "Lax")   
 
 # Signup View
 @api_view(["POST"])
