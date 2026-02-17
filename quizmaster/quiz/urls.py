@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import (
     QuizView,
+    QuestionGenerationView,
     HostActionsView,
     ParticipantActionsView,
     QuestionPaperView,
@@ -11,12 +12,14 @@ from .views import (
 urlpatterns = [
     
     path('', QuizView.as_view(), name='quiz-list-create'),
+    path('generate-questions/', QuestionGenerationView.as_view(), name='generate-questions'),
+    
     path('<str:session_id>/', QuizView.as_view(), name='quiz-detail'),
     
     path('<str:session_id>/start/', HostActionsView.as_view(), {'action': 'start'}, name='quiz-start'),
     path('<str:session_id>/end/', HostActionsView.as_view(), {'action': 'end'}, name='quiz-end'),
     
-    path('<str:session_id>/join/', ParticipantActionsView.as_view(), {'action': 'join'}, name='quiz-join'),
+    path('join/<str:join_code>/', ParticipantActionsView.as_view(), {'action': 'join'}, name='quiz-join'),
     path('<str:session_id>/begin/', ParticipantActionsView.as_view(), {'action': 'start'}, name='participant-start'),
     path('<str:session_id>/complete/', ParticipantActionsView.as_view(), {'action': 'mark_completed'}, name='participant-complete'),
     

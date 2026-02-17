@@ -1,4 +1,6 @@
 from datetime import datetime
+import random
+import string
 from .constants import QuizStatus, PARTICIPANTS_USER_ID, SESSION_NOT_FOUND, UNAUTHORIZED
 from quizmaster.mongo_client import quizzes_collection, sessions_collection, submissions_collection
 from bson import ObjectId
@@ -27,6 +29,7 @@ class QuizService:
         
         return {
             "session_id": str(session["_id"]),
+            "join_code": session.get("join_code"),
             "quiz_id": str(quiz["_id"]),
             "title": quiz.get("title"),
             "description": quiz.get("description"),
@@ -43,6 +46,20 @@ class QuizService:
             "participant_count": len(participants),
             "question_count": len(quiz.get("questions", []))
         }
+
+    @staticmethod
+    def _generate_join_code(length: int = 6) -> str:
+        alphabet = string.ascii_uppercase + string.digits
+        return "".join(random.choices(alphabet, k=length))
+
+    @staticmethod
+    def _get_unique_join_code() -> str:
+        for _ in range(10):
+            code = QuizService._generate_join_code()
+            exists = sessions_collection.find_one({"join_code": code})
+            if not exists:
+                return code
+        raise ValueError("Unable to generate unique join code.")
 
     @staticmethod
     def _merge_sessions_with_quizzes(sessions: list) -> list:
@@ -80,7 +97,8 @@ class QuizService:
             'host_id': user_id,
             'status': QuizStatus.WAITING.value,
             'participants': [], # Will store objects
-            'created_at': datetime.now()
+            'created_at': datetime.now(),
+            'join_code': QuizService._get_unique_join_code()
         }
         session_result = sessions_collection.insert_one(session_data)
         session_data['_id'] = session_result.inserted_id
@@ -111,11 +129,15 @@ class QuizService:
         return QuizService._merge_sessions_with_quizzes(sessions)
 
     @staticmethod
-    def join_session(session_id: str, user_id: str, user_name: str) -> dict:
+    def join_session(join_code: str, user_id: str, user_name: str) -> dict:
         """
         Adds user {user_id, name, score} to the participants list.
         """
-        session = sessions_collection.find_one({"_id": ObjectId(session_id)})
+        normalized_code = (join_code or "").strip().upper()
+        if len(normalized_code) != 6:
+            raise ValueError("Invalid join code.")
+
+        session = sessions_collection.find_one({"join_code": normalized_code})
         if not session:
             raise ValueError(SESSION_NOT_FOUND)
         if session["status"] != QuizStatus.WAITING.value:
@@ -141,7 +163,7 @@ class QuizService:
             }
             
             sessions_collection.update_one(
-                {"_id": ObjectId(session_id)},
+                {"_id": ObjectId(session["_id"])},
                 {"$push": {"participants": new_participant}}
             )
             # Update local list for response
@@ -204,16 +226,14 @@ class QuizService:
         
         # Update participant's quiz_start_time and status to 'active'
         sessions_collection.update_one(
-            {
-                "_id": ObjectId(session_id),
-                PARTICIPANTS_USER_ID: user_id
-            },
+            {"_id": ObjectId(session_id)},
             {
                 "$set": {
-                    "participants.$.quiz_start_time": start_time,
-                    "participants.$.status": "active"
+                    "participants.$[participant].quiz_start_time": start_time,
+                    "participants.$[participant].status": "active"
                 }
-            }
+            },
+            array_filters=[{"participant.user_id": user_id}]
         )
         
         return {
@@ -287,13 +307,9 @@ class QuizService:
         # 4. UPDATE SCORE IN PARTICIPANT OBJECT
         if points > 0:
             sessions_collection.update_one(
-                {
-                    "_id": ObjectId(session_id), 
-                    PARTICIPANTS_USER_ID: user_id 
-                },
-                {
-                    "$inc": {"participants.$.score": points}
-                }
+                {"_id": ObjectId(session_id)},
+                {"$inc": {"participants.$[participant].score": points}},
+                array_filters=[{"participant.user_id": user_id}]
             )
 
         return {"is_correct": is_correct, "points": points}
@@ -372,13 +388,9 @@ class QuizService:
         
         # Update participant status to 'completed'
         sessions_collection.update_one(
-            {
-                "_id": ObjectId(session_id),
-                PARTICIPANTS_USER_ID: user_id
-            },
-            {
-                "$set": {"participants.$.status": "completed"}
-            }
+            {"_id": ObjectId(session_id)},
+            {"$set": {"participants.$[participant].status": "completed"}},
+            array_filters=[{"participant.user_id": user_id}]
         )
         return {"session_id": session_id, "user_id": user_id, "status": "completed"}
 
@@ -393,11 +405,20 @@ class QuizService:
             
         sessions_collection.update_one(
             {"_id": ObjectId(session_id)},
-            {"$set": {"status": "completed"}}
+            {
+                "$set": {
+                    "status": "completed",
+                    "participants.$[].status": "completed"
+                }
+            }
         )
+        
+        print(f"Quiz {session_id} has been marked as completed by host {host_id}.")
+    
         return {"session_id": session_id, "status": "completed"}
     
     
+    @staticmethod
     def get_review_answers(session_id: str, user_id: str) -> list:
  
         session = sessions_collection.find_one({"_id": ObjectId(session_id)})

@@ -6,11 +6,11 @@ import os
 
 # Load environment variables from .env file
 load_dotenv()
-# Get MongoDB URI from environment
+# Get MongoDB URI from environment(uri )
 uri = os.getenv('MONGO_URI')
 
 # Create a new client and connect to the server
-client = MongoClient(uri, server_api=ServerApi('1'))
+client = MongoClient(uri)
 
 db = client.quizmaster
 users_collection = db.users

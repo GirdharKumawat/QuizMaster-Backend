@@ -34,6 +34,7 @@ class ParticipantSerializer(serializers.Serializer):
 # --------------------------------------
 class QuizSessionSerializer(serializers.Serializer):
     session_id = serializers.CharField()
+    join_code = serializers.CharField(required=False, allow_null=True)
     quiz_id = serializers.CharField()
     title = serializers.CharField()
     topic = serializers.CharField()
@@ -68,7 +69,7 @@ class QuizCreateSerializer(serializers.Serializer):
     questions = QuestionSerializer(many=True, allow_empty=False)
 
 class JoinQuizSerializer(serializers.Serializer):
-    session_id = serializers.CharField()
+    join_code = serializers.CharField()
 
 class SubmitAnswerSerializer(serializers.Serializer):
     session_id = serializers.CharField()

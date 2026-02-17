@@ -2,12 +2,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
-from .serializers import QuizCreateSerializer,  QuizSessionSerializer, PlayerQuestionSerializer
+from .serializers import QuizCreateSerializer, QuizSessionSerializer, PlayerQuestionSerializer
 from .services import QuizService
+from .ai_client import QuizAIClient
 from accounts.authentication import CookieJWTAuthentication
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 from datetime import datetime
+import json
 
 # Quiz Views 
 class QuizView(APIView):
@@ -56,6 +58,33 @@ class QuizView(APIView):
         except ValueError as e:
             return Response({"message": str(e)}, status=status.HTTP_404_NOT_FOUND)
 
+# view to generate questions using AI for a quiz session (host only)
+class QuestionGenerationView(APIView):
+    """POST /quizzes/generate-question/ - Generate questions using AI (host only)"""
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        print("Received question generation request with data:", request.data)
+        topic = request.data.get("topic")
+        focus = request.data.get("focus", "general concepts")
+        difficulty = request.data.get("difficulty", "medium")
+        count = request.data.get("count", 5)
+
+        ai_client = QuizAIClient()
+        try:
+            generated_questions = ai_client.generate_questions(
+                topic=topic,
+                focus=focus,
+                difficulty=difficulty,
+                count=count
+            )
+            return Response({"generated_questions": generated_questions}, status=status.HTTP_200_OK) 
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except PermissionError as e:
+            return Response({"error": str(e)}, status=status.HTTP_403_FORBIDDEN)
+
 
 
 class HostActionsView(APIView):
@@ -86,6 +115,7 @@ class HostActionsView(APIView):
                     f'quiz_{session_id}',
                     {'type': 'quiz_ended', 'session_id': session_id}
                 )
+            
                 return Response(result, status=status.HTTP_200_OK)
             
             else:
@@ -98,23 +128,29 @@ class HostActionsView(APIView):
 class ParticipantActionsView(APIView):
     """
     Participant actions for quiz gameplay.
-    POST /quizzes/<session_id>/join/ - Join the quiz session
+    
+    POST /quizzes/join/<join_code>/ - Join the quiz session (requires 6-char join code)
+    
     POST /quizzes/<session_id>/begin/ - Start quiz timer for participant
     POST /quizzes/<session_id>/complete/ - Mark participant as completed
     """
     authentication_classes = [CookieJWTAuthentication]
     permission_classes = [IsAuthenticated]
     
-    def post(self, request, session_id, action):
+    def post(self, request, action, session_id=None, join_code=None):
         user_id = request.user.get("_id")
         username = request.user.get("username")
         channel_layer = get_channel_layer()
         
         try:
             if action == "join":
-                joined_session_data = QuizService.join_session(session_id, user_id, username)
+                if not join_code:
+                    return Response({"error": "join_code is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+                joined_session_data = QuizService.join_session(join_code, user_id, username)
+                resolved_session_id = joined_session_data.get("session_id")
                 async_to_sync(channel_layer.group_send)(
-                    f'quiz_{session_id}',
+                    f'quiz_{resolved_session_id}',
                     {
                         'type': 'participant_joined',
                         'user_id': user_id,
@@ -135,7 +171,7 @@ class ParticipantActionsView(APIView):
                         'type': 'update_participant_status',
                         'user_id': user_id,
                         'status': 'active',
-                        'quiz_start_time': start_time
+                        'quiz_start_time': start_time.isoformat()
                     }
                     
                 )
@@ -229,11 +265,16 @@ class ReviewAnswersView(APIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-# a temparoary view to tunckate the sessions collection and quiz collection
+
+# DANGER: Dev-only route. Protected by DEBUG check.
 class TruncateCollectionsView(APIView):
-    
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
+
     def delete(self, request):
-        
+        from django.conf import settings
+        if not settings.DEBUG:
+            return Response({"error": "Not allowed in production."}, status=status.HTTP_403_FORBIDDEN)
         try:
             QuizService.truncate_collections()
             return Response({"message": "Collections truncated successfully."}, status=status.HTTP_200_OK)

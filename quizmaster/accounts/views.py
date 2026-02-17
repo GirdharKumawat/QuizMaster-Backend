@@ -1,3 +1,6 @@
+import logging
+import os
+
 from rest_framework.decorators import api_view, permission_classes, authentication_classes
 from rest_framework.permissions import IsAuthenticated
 from accounts.authentication import CookieJWTAuthentication
@@ -9,13 +12,16 @@ from bson import ObjectId
 from .serializers import SignupSerializer, LoginSerializer
 from quizmaster.mongo_client import users_collection
 from dotenv import load_dotenv
-import os
+from quizmaster.settings import SIMPLE_JWT
 load_dotenv()
-# import this form .evn or settings in future
 
+logger = logging.getLogger(__name__)
+ 
  
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "False").lower() == "true"
 SAME_SITE = os.getenv("SAME_SITE", "Lax")   
+ACCESS_MAX_AGE = SIMPLE_JWT['ACCESS_TOKEN_LIFETIME'].total_seconds()
+REFRESH_MAX_AGE = SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()
 
 # Signup View
 @api_view(["POST"])
@@ -39,7 +45,8 @@ def signup(request):
     try:
         users_collection.insert_one(user_data)
     except Exception as e:
-        return Response({"error": "Failed to create user."+e}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.exception("Failed to create user")
+        return Response({"error": "Failed to create user."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     user = users_collection.find_one({"email": data["email"]})
     access_token, refresh_token = create_tokens_for_user(user)
@@ -50,8 +57,8 @@ def signup(request):
         "username": user["username"],
         "email": user["email"]
     }, status=status.HTTP_201_CREATED)
-    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=ACCESS_MAX_AGE)
+    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=REFRESH_MAX_AGE)  # Refresh token typically has a longer lifespan
     
     return response
 
@@ -61,6 +68,7 @@ def login(request):
 
     Expected input: {"email": str, "password": str}
     """
+    
     serializer = LoginSerializer(data=request.data)
     if not serializer.is_valid():
         return Response({"message":serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -77,8 +85,8 @@ def login(request):
         "username": user["username"],
         "email": user["email"]
     }, status=status.HTTP_200_OK)
-    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+    response.set_cookie(key="access_token", value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=ACCESS_MAX_AGE)
+    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=REFRESH_MAX_AGE)  # Refresh token typically has a longer lifespan
     
     return response
 
@@ -105,10 +113,11 @@ def cookie_token_refresh(request):
         token = RefreshToken(refresh_token)
         access_token = str(token.access_token)
         response = Response({'msg': 'Token refreshed successfully'})
-        response.set_cookie(key='access_token', value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
+        response.set_cookie(key='access_token', value=access_token, httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=ACCESS_MAX_AGE)
         return response
     except Exception as e:
-        return Response({"error": "Failed to refresh token."+e}, status=status.HTTP_400_BAD_REQUEST)
+        logger.exception("Failed to refresh token")
+        return Response({"error": "Failed to refresh token."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 
@@ -129,7 +138,8 @@ def profile(request):
         user['_id'] = str(user['_id'])  # Convert ObjectId to string for JSON serialization
         return Response(user, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response({"error": "Invalid or expired access token. "+e}, status=status.HTTP_400_BAD_REQUEST)
+        logger.exception("Invalid or expired access token")
+        return Response({"error": "Invalid or expired access token."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
@@ -137,12 +147,12 @@ def profile(request):
 @permission_classes([IsAuthenticated])
 def logout(request):
     """Clear auth cookies to log the user out."""
-    # response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
+    response = Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
     # # Clear cookies by setting empty value and expired date.
-    # response.set_cookie('access_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    # response.set_cookie('refresh_token', value='', expires='Thu, 01 Jan 1970 00:00:00 GMT', httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE)
-    # return response
-    Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
+    response.set_cookie('access_token', value='',   httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=0)
+    response.set_cookie('refresh_token', value='',  httponly=True, secure=COOKIE_SECURE, samesite=SAME_SITE, max_age=0)
+    return response
+    # Response({'msg': 'Logout successfully'}, status=status.HTTP_205_RESET_CONTENT)
 
 
 

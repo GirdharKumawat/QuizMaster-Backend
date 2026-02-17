@@ -17,12 +17,8 @@ class CookieJWTAuthentication(JWTAuthentication):
         if not token:
             return None  # No token means no authentication attempted
 
-        try:
-            validated_token = self.get_validated_token(token)
-        except AuthenticationFailed as e:
-            raise AuthenticationFailed(f"Token validation failed: {str(e)}")
- 
-         
+        validated_token = self.get_validated_token(token)
+  
         try:
             user_doc = users_collection.find_one({"_id": ObjectId(validated_token.get("user_id"))}, {"password": 0})
         except Exception:
